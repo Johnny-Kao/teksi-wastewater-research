@@ -28,7 +28,8 @@ jobs:
         run: docker compose up -d db
       - name: Create official TEKSI database
         working-directory: upstream
-        run: for i in $(seq 1 60); do docker compose exec -T db pg_isready -U postgres && break || sleep 2; done
+        run: |
+          for i in $(seq 1 60); do docker compose exec -T db pg_isready -U postgres && break || sleep 2; done
           docker compose exec -T db createdb -U postgres tww
       - name: Install official datamodel
         working-directory: upstream
