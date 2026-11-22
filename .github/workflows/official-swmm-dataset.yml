@@ -51,6 +51,12 @@ jobs:
       - name: Install official data model (PUM)
         working-directory: upstream
         run: docker compose run --rm -T pum -p pg_tww -d datamodel install -p SRID 2056
+      - name: Download upstream INTERLIS validator (official setup)
+        working-directory: upstream
+        run: |
+          set -e
+          bash plugin/scripts/download-interlis-libs.sh
+          test -s plugin/teksi_wastewater/interlis/bin/ilivalidator-1.15.0.jar
       - name: Build official QGIS container
         working-directory: upstream
         run: docker compose --profile qgis build qgis
@@ -63,6 +69,11 @@ jobs:
       - name: Import official SIA405 XTF
         working-directory: upstream
         run: docker compose exec -T qgis sh -c 'cd /usr/src/plugin && xvfb-run python3 tww_cmd.py interlis_import --xtf_file /usr/src/plugin/tests/qgis/data/minimal-dataset-SIA405-ABWASSER.xtf --pghost db --pgdatabase tww --pguser postgres --pgpass postgres --pgport 5432'
+      - name: Assert actual SIA405 import persisted reaches
+        working-directory: upstream
+        run: |
+          docker compose exec -T db psql -U postgres -d tww -Atqc 'SELECT COUNT(*) FROM tww_od.reach'
+          test "$(docker compose exec -T db psql -U postgres -d tww -Atqc 'SELECT COUNT(*) FROM tww_od.reach')" -gt 0
       - name: Import official DSS XTF
         working-directory: upstream
         run: docker compose exec -T qgis sh -c 'cd /usr/src/plugin && xvfb-run python3 tww_cmd.py interlis_import --xtf_file /usr/src/plugin/tests/qgis/data/minimal-dataset-DSS.xtf --pghost db --pgdatabase tww --pguser postgres --pgpass postgres --pgport 5432'
