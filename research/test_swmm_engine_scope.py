@@ -79,7 +79,7 @@ class EngineScope(unittest.TestCase):
                 sw.con.close()
             text=p.read_text()
             try:
-                solver.run(str(p),str(Path(td)/"model.rpt"),str(Path(td)/"model.out"))
+                solver.swmm_run(str(p),str(Path(td)/"model.rpt"),str(Path(td)/"model.out"))
                 status="success"
             except Exception as e:
                 status=f"{type(e).__name__}: {e}"
@@ -97,7 +97,7 @@ class EngineScope(unittest.TestCase):
         self.assertIn("R2",text)
         self.assertNotIn("O2",self.section(text,"OUTFALLS"))
         self.assertIn("O2",self.section(text,"CONDUITS"))
-        self.assertTrue("ERROR" in report or status!="success",(status,report[-1200:]))
+        self.assertIn("ERROR",report, (status, report[-1200:]))
     @staticmethod
     def section(text, name):
         m=re.search(rf"(?ms)^\[{name}\]\n(.*?)(?=^\[[A-Z_]+\]\n|\Z)",text)
