@@ -36,7 +36,7 @@ SWMM=get_original()
 SECTIONS=set(re.findall(r'self\.swmm_table\("([A-Z_]+)"',UPSTREAM.read_text()))
 SCHEMAS={
     "JUNCTIONS":'"Name" text, "InvertElev" float, "MaxDepth" float, "InitDepth" float, "SurchargeDepth" float, "PondedArea" float',
-    "OUTFALLS":'"Name" text, "InvertElev" float, "Type" text, "Gated" text',
+    "OUTFALLS":'"Name" text, "InvertElev" float, "Type" text, "StageData" float, "tide_gate" text, "RouteTo" text',
     "CONDUITS":'"Name" text, "FromNode" text, "ToNode" text, "Length" float, "Roughness" float, "InletOffset" float, "OutletOffset" float, "InitFlow" float, "MaxFlow" float',
     "XSECTIONS":'"Link" text, "Shape" text, "Geom1" float, "Geom2" float, "Geom3" float, "Geom4" float, "Barrels" integer',
     "COORDINATES":'"Node" text, "XCoord" float, "YCoord" float',
@@ -44,7 +44,7 @@ SCHEMAS={
 BASE='"obj_id" text, "state" text, "hierarchy" text'
 TABLE_DATA={
   "JUNCTIONS":[("N1",10.,2.,0.,0.,0.,"N1"),("N2",10.,2.,0.,0.,0.,"N2")],
-  "OUTFALLS":[("O1",9.,"FREE","NO","O1"),("O2",9.,"FREE","NO","O2")],
+  "OUTFALLS":[("O1",9.,"FREE",0.,"NO","0","O1"),("O2",9.,"FREE",0.,"NO","0","O2")],
   "CONDUITS":[("R1","N1","O1",10.,0.013,0.,0.,0.,0.,"R1"),("R2","N2","O2",10.,0.013,0.,0.,0.,0.,"R2")],
   "XSECTIONS":[("R1","CIRCULAR",0.5,0.,0.,0.,1,"R1"),("R2","CIRCULAR",0.5,0.,0.,0.,1,"R2")],
   "COORDINATES":[("N1",0.,0.,"N1"),("O1",10.,0.,"O1"),("N2",0.,10.,"N2"),("O2",10.,10.,"O2")],
