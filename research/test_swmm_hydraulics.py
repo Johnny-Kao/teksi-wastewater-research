@@ -20,7 +20,7 @@ class HydraulicScopeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         EngineScope.setUpClass()
-    def run(self, structures, reaches):
+    def simulate_flow(self, structures, reaches):
         with tempfile.TemporaryDirectory() as td:
             p=Path(td)/"test.inp"
             obj=SWMM()
@@ -42,9 +42,9 @@ class HydraulicScopeTest(unittest.TestCase):
             print("FLOW_SCENARIO",structures,reaches,"count",len(flows),"min",min(flows),"max",max(flows),flush=True)
             return flows
     def test_unrelated_nodes_do_not_silently_change_flow_in_selected_reach(self):
-        full=self.run(None,None)
-        selected=self.run(["N1","O1"],["R1"])
-        reach_only=self.run([],["R1"])
+        full=self.simulate_flow(None,None)
+        selected=self.simulate_flow(["N1","O1"],["R1"])
+        reach_only=self.simulate_flow([],["R1"])
         self.assertGreater(max(abs(f) for f in selected),0,"No meaningful hydraulic flow generated")
         self.assertEqual(len(full),len(selected))
         self.assertEqual(len(full),len(reach_only))
