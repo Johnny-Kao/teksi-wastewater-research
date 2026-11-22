@@ -57,7 +57,7 @@ def generate(name,structures,reaches):
             sections[key]=sum(1 for z in end.splitlines() if z.strip() and not z.strip().startswith(";"))
     def data_rows(section):
         import re
-        matched=re.search(rf"(?ms)^\\[{section}\\]\\n(.*?)(?=^\\[[A-Z_]+\\]\\n|\\Z)",txt)
+        matched=re.search(rf"(?ms)^\[{section}\]\n(.*?)(?=^\[[A-Z_]+\]\n|\Z)",txt)
         if not matched:
             return []
         return [line.strip().split() for line in matched.group(1).splitlines()
