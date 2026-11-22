@@ -1,0 +1,29 @@
+name: Validate clean TEKSI staging fork tests and style
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fork-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Johnny-Kao/wastewater
+          ref: staging/swmm-hydraulic-load-20261122
+          persist-credentials: false
+          path: upstream
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project test and style dependencies
+        run: python -m pip install 'psycopg[binary]==3.2.13' 'black==26.10.0' 'flake8==7.4.0'
+      - name: Run SWMM importer regression tests from staged fork
+        env:
+          PYTHONPATH: upstream/plugin
+        run: python -m unittest discover -s upstream/plugin/tests/qgis -p 'test_swmm_hydraulic_load.py' -v
+      - name: Check project Black 99 convention on edited files
+        run: python -m black --check --line-length 99 upstream/plugin/tests/qgis/test_swmm_hydraulic_load.py upstream/plugin/teksi_wastewater/processing_provider/TwwSwmm.py
+      - name: Check project Flake8 convention on edited files
+        run: python -m flake8 --max-line-length=115 --ignore=E501,E203,W503 upstream/plugin/tests/qgis/test_swmm_hydraulic_load.py upstream/plugin/teksi_wastewater/processing_provider/TwwSwmm.py
