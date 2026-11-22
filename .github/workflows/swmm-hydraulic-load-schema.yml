@@ -1,0 +1,60 @@
+name: TEKSI reach hydraulic-load schema contract research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  schema:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: teksi/wastewater
+          ref: 553ce1bdaf0f21329d5c706c76daac3ced229095
+          path: upstream
+          persist-credentials: false
+      - name: Launch official PostGIS
+        working-directory: upstream
+        run: |
+          docker compose up -d db
+          sleep 10
+          for i in $(seq 1 45); do
+            docker compose exec -T db psql -U postgres -d postgres -Atqc 'SELECT 1' 2>/dev/null | grep -qx 1 && break
+            sleep 2
+          done
+          docker compose exec -T db createdb -U postgres tww
+      - name: Install official PUM model
+        working-directory: upstream
+        run: docker compose run --rm -T pum -p pg_tww -d datamodel install -p SRID 2056
+      - name: Inspect actual reach columns and permitted type
+        working-directory: upstream
+        run: |
+          set -e
+          docker compose exec -T db psql -U postgres -d tww -P pager=off -c "
+            SELECT column_name, data_type, udt_name, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema='tww_od' AND table_name='reach'
+              AND (column_name LIKE '%hydraulic%' OR column_name LIKE '%dss2020%')
+            ORDER BY column_name;"
+          docker compose exec -T db psql -U postgres -d tww -Atqc "
+            SELECT 'legacy_column_exists=' || EXISTS(
+              SELECT 1 FROM information_schema.columns WHERE table_schema='tww_od'
+              AND table_name='reach' AND column_name='dss2020_hydraulic_load_current'
+            );"
+          docker compose exec -T db psql -U postgres -d tww -Atqc "
+            SELECT 'new_column_exists=' || EXISTS(
+              SELECT 1 FROM information_schema.columns WHERE table_schema='tww_od'
+              AND table_name='reach' AND column_name='hydraulic_load_current'
+            );"
+      - name: Execute original SQL writeback target inside rollback transaction
+        working-directory: upstream
+        run: |
+          set +e
+          docker compose exec -T db psql -U postgres -d tww -v ON_ERROR_STOP=1 -c "BEGIN; UPDATE tww_od.reach SET dss2020_hydraulic_load_current = 80 WHERE obj_id = 'research-no-row'; ROLLBACK;"
+          old_rc=$?
+          docker compose exec -T db psql -U postgres -d tww -v ON_ERROR_STOP=1 -c "BEGIN; UPDATE tww_od.reach SET hydraulic_load_current = 80 WHERE obj_id = 'research-no-row'; ROLLBACK;"
+          new_rc=$?
+          echo "ORIGINAL_COLUMN_WRITE_RC=$old_rc"
+          echo "CURRENT_COLUMN_WRITE_RC=$new_rc"
+          test "$old_rc" -ne 0 && test "$new_rc" -eq 0
