@@ -59,6 +59,7 @@ def run_graph(features):
     graph.timings = []
     graph.edge_layer = Layer(features)
     graph._profile = lambda _name: None
+    graph.print_profile = lambda: None
     def seed_vertices():
         graph.vertexIds = {"A": 1, "B": 2, "C": 3, "D": 4}
         for key, n in graph.vertexIds.items():
