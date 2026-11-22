@@ -98,6 +98,20 @@ class EngineScope(unittest.TestCase):
         self.assertNotIn("O2",self.section(text,"OUTFALLS"))
         self.assertIn("O2",self.section(text,"CONDUITS"))
         self.assertIn("ERROR",report, (status, report[-1200:]))
+    def test_select_reach_only_fails_missing_outfall(self):
+        status,text,report=self.simulate([],["R1"])
+        self.assertIn("R1",self.section(text,"CONDUITS"))
+        self.assertNotIn("O1",self.section(text,"OUTFALLS"))
+        self.assertIn("ERROR",report,(status,report[-1200:]))
+        self.assertIn("undefined object O1",report)
+
+    def test_select_complete_first_network_succeeds(self):
+        status,text,report=self.simulate(["N1","O1"],["R1"])
+        self.assertEqual(status,"success",report[-1200:])
+        self.assertNotIn("ERROR",report)
+        self.assertNotIn("R2",self.section(text,"CONDUITS"))
+        self.assertNotIn("O2",self.section(text,"OUTFALLS"))
+
     @staticmethod
     def section(text, name):
         m=re.search(rf"(?ms)^\[{name}\]\n(.*?)(?=^\[[A-Z_]+\]\n|\Z)",text)
