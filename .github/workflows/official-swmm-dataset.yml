@@ -1,0 +1,84 @@
+name: TEKSI official dataset SWMM selection
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  official:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: research
+      - uses: actions/checkout@v4
+        with:
+          repository: teksi/wastewater
+          ref: 553ce1bdaf0f21329d5c706c76daac3ced229095
+          path: upstream
+          persist-credentials: false
+      - name: Stage standalone research probe
+        run: cp research/research/official_postgis_swmm_probe.py upstream/plugin/official_postgis_swmm_probe.py
+      - name: Reclaim runner storage
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          docker system prune -af || true
+      - name: Launch pinned PostGIS
+        working-directory: upstream
+        run: docker compose up -d db
+      - name: Create database after stable initialization
+        working-directory: upstream
+        run: |
+          set -e
+          echo "Allow postgres image initialization to finish..."
+          sleep 12
+          for i in $(seq 1 60); do
+            if docker compose exec -T db psql -U postgres -d postgres -Atqc "SELECT 1" 2>/dev/null | grep -qx 1; then
+              if docker compose exec -T db psql -U postgres -d postgres -Atqc "SELECT 1" 2>/dev/null | grep -qx 1; then
+                break
+              fi
+            fi
+            sleep 3
+          done
+          for i in $(seq 1 30); do
+            if docker compose exec -T db psql -U postgres -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname='tww'" | grep -qx 1; then
+              echo "DB already exists"; break
+            fi
+            if docker compose exec -T db createdb -U postgres tww; then break; fi
+            sleep 3
+          done
+          docker compose exec -T db psql -U postgres -d tww -Atqc "SELECT current_database()"
+      - name: Install official data model (PUM)
+        working-directory: upstream
+        run: docker compose run --rm -T pum -p pg_tww -d datamodel install -p SRID 2056
+      - name: Build official QGIS container
+        working-directory: upstream
+        run: docker compose --profile qgis build qgis
+      - name: Start official QGIS container
+        working-directory: upstream
+        run: docker compose --profile qgis up -d qgis
+      - name: Import official organization XTF
+        working-directory: upstream
+        run: docker compose exec -T qgis sh -c 'cd /usr/src/plugin && xvfb-run python3 tww_cmd.py interlis_import --xtf_file /usr/src/plugin/tests/qgis/data/minimal-dataset-organisation-arbon-only.xtf --pghost db --pgdatabase tww --pguser postgres --pgpass postgres --pgport 5432'
+      - name: Import official SIA405 XTF
+        working-directory: upstream
+        run: docker compose exec -T qgis sh -c 'cd /usr/src/plugin && xvfb-run python3 tww_cmd.py interlis_import --xtf_file /usr/src/plugin/tests/qgis/data/minimal-dataset-SIA405-ABWASSER.xtf --pghost db --pgdatabase tww --pguser postgres --pgpass postgres --pgport 5432'
+      - name: Import official DSS XTF
+        working-directory: upstream
+        run: docker compose exec -T qgis sh -c 'cd /usr/src/plugin && xvfb-run python3 tww_cmd.py interlis_import --xtf_file /usr/src/plugin/tests/qgis/data/minimal-dataset-DSS.xtf --pghost db --pgdatabase tww --pguser postgres --pgpass postgres --pgport 5432'
+      - name: Export selected and whole SWMM INPs
+        working-directory: upstream
+        run: docker compose exec -T qgis sh -c 'cd /usr/src/plugin && xvfb-run python3 official_postgis_swmm_probe.py'
+      - name: Save official SWMM artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: official-swmm-inps
+          path: upstream/plugin/research_swmm_official_output/*.inp
+          if-no-files-found: ignore
+      - name: Diagnostics
+        if: always()
+        working-directory: upstream
+        run: |
+          docker compose ps
+          docker compose logs --tail=50 db
