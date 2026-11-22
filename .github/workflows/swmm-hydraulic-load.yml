@@ -1,0 +1,21 @@
+name: TEKSI SWMM hydraulic-load conversion research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  conversion:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: teksi/wastewater
+          ref: 553ce1bdaf0f21329d5c706c76daac3ced229095
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run unchanged upstream hydraulic load converter
+        run: python research/test_swmm_hydraulic_load_rounding.py
