@@ -1,6 +1,9 @@
 name: SWMM hydraulic-load test-first regression
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - staging/swmm-hydraulic-load-fix-20261122
 permissions:
   contents: read
 jobs:
