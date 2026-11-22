@@ -1,9 +1,17 @@
 diff --git a/plugin/teksi_wastewater/processing_provider/TwwSwmm.py b/plugin/teksi_wastewater/processing_provider/TwwSwmm.py
 --- a/plugin/teksi_wastewater/processing_provider/TwwSwmm.py
 +++ b/plugin/teksi_wastewater/processing_provider/TwwSwmm.py
-@@ -758 +758 @@
+@@ -757,4 +757,4 @@
+         for ws in link_summary:
 -            ws["max_over_full_flow"] = int(round(float(ws["max_over_full_flow"]))) * 100
 +            ws["max_over_full_flow"] = round(float(ws["max_over_full_flow"]) * 100)
-@@ -784 +784 @@
+ 
+         return link_summary
+@@ -781,6 +781,6 @@
+         self.populate_attribute(
+             link_summary,
+             "reach",
 -            "dss2020_hydraulic_load_current",
 +            "hydraulic_load_current",
+             "max_over_full_flow",
+         )
