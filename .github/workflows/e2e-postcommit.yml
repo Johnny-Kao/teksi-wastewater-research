@@ -1,0 +1,47 @@
+name: TEKSI full PostGIS import postcommit research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: research
+      - uses: actions/checkout@v4
+        with:
+          repository: teksi/wastewater
+          ref: 553ce1bdaf0f21329d5c706c76daac3ced229095
+          path: upstream
+          persist-credentials: false
+      - name: Install research script without modifying upstream git
+        run: cp research/research/e2e_postcommit_retry.py upstream/plugin/e2e_postcommit_retry.py
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          docker system prune -af || true
+      - name: Start official PostGIS DB
+        working-directory: upstream
+        run: docker compose up -d db
+      - name: Create official TEKSI database
+        working-directory: upstream
+        run: docker compose exec -T db createdb -U postgres tww
+      - name: Install official datamodel
+        working-directory: upstream
+        run: docker compose run --rm -T pum -p pg_tww -d datamodel install -p SRID 2056
+      - name: Build official QGIS test container
+        working-directory: upstream
+        run: docker compose --profile qgis build qgis
+      - name: Start official QGIS test container
+        working-directory: upstream
+        run: docker compose --profile qgis up -d qgis
+      - name: Run full-model postcommit failure and retry research
+        working-directory: upstream
+        run: docker compose exec -T qgis sh -c 'cd /usr/src/plugin && xvfb-run python3 e2e_postcommit_retry.py'
+      - name: Diagnostic summary
+        if: always()
+        working-directory: upstream
+        run: docker compose ps
