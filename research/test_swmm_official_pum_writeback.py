@@ -14,7 +14,7 @@ import unittest
 import psycopg
 from swmm.toolkit import solver
 
-UPSTREAM = Path(__file__).resolve().parents[1] / "upstream"
+UPSTREAM = Path(__file__).resolve().parents[2] / "upstream"
 SOURCE = UPSTREAM / "plugin/teksi_wastewater/processing_provider/TwwSwmm.py"
 DSN = os.environ["OFFICIAL_TEST_DATABASE_URL"]
 BASELINE = os.environ.get("EXPECT_BASELINE_FAILURE") == "1"
