@@ -11,14 +11,14 @@ Generated patch: `scripts/prepare_qgis_8_fix.py` transforms the original read-on
 ### Proposed fixes
 - `vw_tww_ws_maintenance`: display `ws__bottom_label` (missing) → `ws_identifier` (exists).
 - `vw_tww_additional_ws`: display `_label` (missing) → `identifier` (exists).
-- `re_maintenance_event_wastewater_structure`: display `COALESCE("obj_id", '<NULL>')` (missing) → `COALESCE("fk_wastewater_structure", "id")` (both fields exist). **Confirm intended user-facing label** before proposing upstream change.
+- `re_maintenance_event_wastewater_structure`: display `COALESCE("obj_id", '<NULL>')` (missing) → `COALESCE("id", '<NULL>')` (existing row identity; keeps original fallback). An earlier candidate used `fk_wastewater_structure` as primary label, but this would conflate distinct events attached to the same structure; rejected in review.
 - `mvw_tww_channel`: two form references `_from_node`/`_to_node` missing → actual `_from_ne`/`_to_ne` fields; QGIS indices 42 and 45.
 - `vw_tww_channel_maintenance`: same two replacements; indices 20 and 26.
 - `measuring_point`: remove invalid field widget `fk_reference_station`. A similarly named association field exists in an independent mapping relation, so **do not add a column to measuring_point**. Confirm removal does not obscure intended relation UX.
 
 ## Controlled native Red/Green result
 
-[GitHub Actions A/B #45249526400](https://github.com/Johnny-Kao/teksi-wastewater-research/actions/runs/45249526400): same docker QGIS stable-noble + official PUM DB; identical scripts applied to baseline and candidate.
+[Final reviewed GitHub Actions A/B #45251209853](https://github.com/Johnny-Kao/teksi-wastewater-research/actions/runs/45251209853) (SUCCESS, head 7287313): same docker QGIS stable-noble + official PUM DB; identical scripts applied to baseline and revised candidate. [Initial A/B #45249526400](https://github.com/Johnny-Kao/teksi-wastewater-research/actions/runs/45249526400) was also green, but its maintenance-event substitute was semantically weaker and has since been corrected.
 
 | Check | Baseline | Research candidate |
 |---|---:|---:|
