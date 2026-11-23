@@ -1,4 +1,4 @@
-name: QGIS PostgreSQL real-schema check
+name: QGIS PostgreSQL full relation catalog check
 on:
   push:
     branches:
@@ -25,7 +25,7 @@ jobs:
       - name: Export PostgreSQL field catalog
         working-directory: /tmp/teksi-upstream
         run: |
-          docker compose exec -T db psql -U postgres -d tww -At -c "SELECT COALESCE(json_agg(row_to_json(t)),'[]'::json) FROM (SELECT table_schema,table_name,column_name FROM information_schema.columns WHERE table_schema IN ('tww_app','tww_od')) t;" > "$GITHUB_WORKSPACE/postgres-columns.json"
+          docker compose exec -T db psql -U postgres -d tww -At -c "SELECT COALESCE(json_agg(row_to_json(t)),'[]'::json) FROM (SELECT ns.nspname AS table_schema, cls.relname AS table_name, att.attname AS column_name FROM pg_catalog.pg_attribute att JOIN pg_catalog.pg_class cls ON att.attrelid=cls.oid JOIN pg_catalog.pg_namespace ns ON cls.relnamespace=ns.oid WHERE ns.nspname IN ('tww_app','tww_od') AND cls.relkind IN ('r','v','m','p','f') AND att.attnum>0 AND NOT att.attisdropped) t;" > "$GITHUB_WORKSPACE/postgres-columns.json"
       - name: Compare metadata against actual views and tables
         run: python3 scripts/check_qgis_vs_postgres.py /tmp/teksi-upstream/project/teksi_wastewater.qgs postgres-columns.json | tee db-schema-summary.txt
       - uses: actions/upload-artifact@v4
