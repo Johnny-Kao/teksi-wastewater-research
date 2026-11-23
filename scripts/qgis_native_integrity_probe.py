@@ -45,6 +45,40 @@ for name in names:
             values["evalError"]=expression.evalErrorString()
         results.append(values)
         print("LAYER",json.dumps(values))
+
+print("ALL_LAYER_DISPLAY_EXPRESSIONS")
+display_failures=[]
+form_invalid=[]
+for l in project.mapLayers().values():
+    if not hasattr(l,"fields") or not hasattr(l,"displayExpression"): continue
+    expression_text=l.displayExpression()
+    if expression_text:
+        parsed=QgsExpression(expression_text)
+        c=QgsExpressionContext()
+        c.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(l))
+        ready=parsed.prepare(c)
+        if parsed.hasParserError() or not ready:
+            item={"layer":l.name(),"expression":expression_text,
+                  "missing_columns":sorted(set(parsed.referencedColumns())-{f.name() for f in l.fields()}),
+                  "parse_error":parsed.parserErrorString(),"eval_error":parsed.evalErrorString()}
+            display_failures.append(item)
+            print("BROKEN_DISPLAY",json.dumps(item))
+    def walk_form(e):
+        if hasattr(e,"children"):
+            for child in e.children(): walk_form(child)
+        if hasattr(e,"idx") and hasattr(e,"name"):
+            index=e.idx()
+            if index < 0 or index>=len(l.fields()) or e.name() not in [f.name() for f in l.fields()]:
+                form_invalid.append({"layer":l.name(),"field":e.name(),"index":index})
+    try:
+        for t in l.editFormConfig().tabs():
+            walk_form(t)
+    except Exception as exc:
+        print("FORM_INSPECTION_ERROR",l.name(),str(exc)[:200])
+print("BROKEN_DISPLAY_TOTAL",len(display_failures))
+print("INVALID_FORM_FIELDS_TOTAL",len(form_invalid))
+for item in form_invalid[:75]: print("INVALID_FORM",json.dumps(item))
+
 print("PROJECT_RELATIONS")
 rels=[]
 for id, relation in project.relationManager().relations().items():
@@ -55,5 +89,5 @@ for id, relation in project.relationManager().relations().items():
     rels.append(values)
     if not relation.isValid(): print("INVALID_RELATION",json.dumps(values))
 print("RELATION_SUMMARY",len(rels),"invalid",sum(not v["valid"] for v in rels))
-Path("/tmp/qgis-native-audit.json").write_text(json.dumps({"read":ok,"layers":results,"invalid_relations":[r for r in rels if not r["valid"]]},indent=2))
+Path("/tmp/qgis-native-audit.json").write_text(json.dumps({"read":ok,"layers":results,"invalid_relations":[r for r in rels if not r["valid"]],"invalid_displays":display_failures,"invalid_form_fields":form_invalid},indent=2))
 # Do not fail the entire workflow on invalid project entries; preserve evidence for triage.
