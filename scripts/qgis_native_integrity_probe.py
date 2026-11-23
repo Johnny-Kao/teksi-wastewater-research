@@ -19,14 +19,14 @@ print("QGIS_VERSION",QgsApplication.qgisSettingsDirPath())
 print("PROJECT_READ",ok,"LAYER_COUNT",len(project.mapLayers()))
 print("INVALID_LAYERS",[(layer.name(),layer.providerType()) for layer in project.mapLayers().values() if not layer.isValid()][:30])
 
-names=["vw_tww_ws_maintenance","vw_tww_additional_ws","vw_tww_reach","vw_tww_channel_maintenance",
+names=["re_maintenance_event_wastewater_structure","measuring_point","mvw_tww_channel","vw_tww_ws_maintenance","vw_tww_additional_ws","vw_tww_reach","vw_tww_channel_maintenance",
        "vw_tww_overflow","vw_tww_wastewater_structure","measure_point"]
 results=[]
 for name in names:
     layers=project.mapLayersByName(name)
     for layer in layers:
         fields={f.name() for f in layer.fields()}
-        if name in ("vw_tww_ws_maintenance","vw_tww_additional_ws"):
+        if name in ("vw_tww_ws_maintenance","vw_tww_additional_ws","re_maintenance_event_wastewater_structure","measuring_point","mvw_tww_channel","vw_tww_channel_maintenance"):
             print("AVAILABLE_FIELDS",name,sorted(fields))
         exp=layer.displayExpression()
         ctx=QgsExpressionContext()
