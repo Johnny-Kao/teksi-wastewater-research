@@ -26,6 +26,8 @@ for name in names:
     layers=project.mapLayersByName(name)
     for layer in layers:
         fields={f.name() for f in layer.fields()}
+        if name in ("vw_tww_ws_maintenance","vw_tww_additional_ws"):
+            print("AVAILABLE_FIELDS",name,sorted(fields))
         exp=layer.displayExpression()
         ctx=QgsExpressionContext()
         ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
