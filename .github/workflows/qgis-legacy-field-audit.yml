@@ -15,9 +15,15 @@ jobs:
         run: git clone --depth 1 https://github.com/teksi/wastewater.git /tmp/teksi-upstream
       - name: Audit QGIS XML field references
         run: python3 scripts/audit_qgis_legacy_field.py /tmp/teksi-upstream/project/teksi_wastewater.qgs | tee qgis-legacy-audit.txt
+      - name: Audit all source and QGIS field settings; test proposed cleanup offline
+        run: python3 scripts/audit_project_schema_consistency.py /tmp/teksi-upstream | tee project-consistency-summary.txt
       - name: Preserve audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: qgis-legacy-field-audit
-          path: qgis-legacy-audit.txt
+          path: |
+            qgis-legacy-audit.txt
+            project-consistency-summary.txt
+            audit-report.json
+            candidate-cleanup.diff
