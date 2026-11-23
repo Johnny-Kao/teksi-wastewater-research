@@ -1,0 +1,52 @@
+name: QGIS eight-site repair A-B integration
+on:
+  push:
+    branches:
+      - research/qgis-form-display-repair-20261123
+    paths:
+      - scripts/prepare_qgis_8_fix.py
+      - scripts/qgis_native_integrity_probe.py
+      - .github/workflows/qgis-eight-repair-ab.yml
+  workflow_dispatch:
+jobs:
+  red-green:
+    runs-on: ubuntu-26.04
+    env:
+      QGIS_TEST_VERSION: stable-noble
+      PGSERVICE: pg_tww
+      COMPOSE_PROFILES: qgis
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone upstream and prepare isolated candidate
+        run: |
+          git clone --depth 1 https://github.com/teksi/wastewater.git /tmp/teksi-upstream
+          python3 scripts/prepare_qgis_8_fix.py /tmp/teksi-upstream/project/teksi_wastewater.qgs /tmp/teksi-upstream/project/teksi_wastewater_research_candidate.qgs
+          diff -u /tmp/teksi-upstream/project/teksi_wastewater.qgs /tmp/teksi-upstream/project/teksi_wastewater_research_candidate.qgs > candidate-qgis-8.diff || test "$?" -eq 1
+      - name: Build and initialize native QGIS+PUM test database
+        working-directory: /tmp/teksi-upstream
+        run: |
+          cp .env.example .env
+          docker compose --profile qgis up --build -d
+          until docker compose exec -T db pg_isready -U postgres; do sleep 2; done
+          docker compose exec -T db createdb -U postgres tww
+          docker compose run --rm pum -p pg_tww -d datamodel install -p SRID 2056
+      - name: Run baseline and candidate on same QGIS and database
+        working-directory: /tmp/teksi-upstream
+        run: |
+          docker cp "$GITHUB_WORKSPACE/scripts/qgis_native_integrity_probe.py" "$(docker compose ps -q qgis):/tmp/qgis_native_integrity_probe.py"
+          docker compose exec -T qgis sh -c "xvfb-run -a /usr/bin/python3 /tmp/qgis_native_integrity_probe.py /usr/src/project/teksi_wastewater.qgs" | tee "$GITHUB_WORKSPACE/baseline-qgis.txt"
+          docker compose exec -T qgis sh -c "xvfb-run -a /usr/bin/python3 /tmp/qgis_native_integrity_probe.py /usr/src/project/teksi_wastewater_research_candidate.qgs" | tee "$GITHUB_WORKSPACE/candidate-qgis.txt"
+          grep -q 'BROKEN_DISPLAY_TOTAL 3' "$GITHUB_WORKSPACE/baseline-qgis.txt"
+          grep -q 'INVALID_FORM_FIELDS_TOTAL 5' "$GITHUB_WORKSPACE/baseline-qgis.txt"
+          grep -q 'BROKEN_DISPLAY_TOTAL 0' "$GITHUB_WORKSPACE/candidate-qgis.txt"
+          grep -q 'INVALID_FORM_FIELDS_TOTAL 0' "$GITHUB_WORKSPACE/candidate-qgis.txt"
+          grep -q 'RELATION_SUMMARY 57 invalid 0' "$GITHUB_WORKSPACE/candidate-qgis.txt"
+          grep -q 'PROJECT_READ True LAYER_COUNT 221' "$GITHUB_WORKSPACE/candidate-qgis.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qgis-eight-site-red-green
+          path: |
+            baseline-qgis.txt
+            candidate-qgis.txt
+            candidate-qgis-8.diff
