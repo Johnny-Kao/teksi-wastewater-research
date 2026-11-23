@@ -44,6 +44,19 @@ def audit(project_path):
     print("By XML tag:", dict(sorted(tag_counts.items())))
     for i, (path, where, value) in enumerate(hits, 1):
         print(f"{i:02d}. {path} {where}={value!r}")
+    print("\\nLayer-level impact of legacy references:")
+    for layer in root.findall(".//projectlayers/maplayer"):
+        lname = layer.findtext("layername") or "(unnamed)"
+        lid = layer.findtext("id") or "(no id)"
+        legacy = []
+        for node in layer.iter():
+            for key, value in node.attrib.items():
+                if LEGACY in value:
+                    legacy.append((node.tag, key, value))
+        if legacy:
+            print(f"  layer={lname!r}, id={lid!r}, legacy={len(legacy)}")
+            for tag, key, value in legacy:
+                print(f"    {tag} @{key}={value!r}")
     print(f"Independent references to new name: {len(current_hits)}")
     for path, where, value in current_hits[:30]:
         print(f"  current: {path} {where}={value!r}")
