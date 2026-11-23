@@ -14,7 +14,7 @@ original = source.read_text(encoding="utf-8")
 targets = {
     "vw_tww_ws_maintenance": ("ws__bottom_label", "ws_identifier"),
     "vw_tww_additional_ws": ("_label", "identifier"),
-    "re_maintenance_event_wastewater_structure": ('COALESCE("obj_id", \'<NULL>\')', 'COALESCE("fk_wastewater_structure", "id")'),
+    "re_maintenance_event_wastewater_structure": ('COALESCE("obj_id", \'<NULL>\')', 'COALESCE("id", \'<NULL>\')'),
 }
 form_targets = {
     "mvw_tww_channel": {"_from_node":("_from_ne", 42), "_to_node":("_to_ne", 45)},
@@ -36,7 +36,7 @@ def patch_layer(match):
         else:
             # XML markup uses literal single quotes and escaped angle brackets if any.
             before=f"<previewExpression>{old.replace('<','&lt;').replace('>','&gt;')}</previewExpression>"
-            after=f"<previewExpression>{new}</previewExpression>"
+            after=f"<previewExpression>{new.replace(chr(60), '&lt;').replace(chr(62), '&gt;')}</previewExpression>"
         assert raw.count(before)==1,(name,before)
         raw=raw.replace(before,after,1)
         hits.append(("display",name,old,new))
