@@ -79,9 +79,21 @@ for layer in qgs.findall(".//projectlayers/maplayer"):
         for field, tags in candidates.items():
             if field not in field_defs and tags == {"editable", "labelOnTop", "reuseLastValue"}:
                 orphans.append({"layer": name, "field": field, "settings": sorted(tags)})
+# All obsolete QGIS settings must be redundant rather than unique behavior.
+assert sum(len(layer["legacy"]) for layer in layer_findings) == 12
+for layer in layer_findings:
+    for setting in layer["legacy"]:
+        assert setting["current_sibling"], ("Nonredundant legacy reference", layer, setting)
+        orig = {k: v for k, v in setting["legacy_attr"].items() if k != "name"}
+        sibling = {k: v for k, v in setting["current_sibling_attr"].items() if k != "name"}
+        assert orig == sibling, ("Conflicting QGIS settings", layer, setting)
+note("redundancy_check", all_12_have_identical_new_field_siblings=True)
 report["layers_with_legacy"] = layer_findings
 report["potential_orphan_settings"] = orphans[:150]
 report["potential_orphan_total"] = len(orphans)
+report["potential_orphan_unique_names"] = len({x["field"] for x in orphans})
+report["potential_orphan_prefix_summary"] = Counter(x["field"].split("_")[0] for x in orphans).most_common(25)
+note("broad_scan_limit", detail="QGIS fieldConfiguration may be incomplete or style-dependent; apparent orphans are not proven DB mismatches.")
 
 # Simulate changes in a throwaway clone: prefer removing stale redundant settings.
 text = project.read_text()
@@ -128,7 +140,10 @@ print("Files scanned:", files_seen)
 print("Legacy references:", len(hits))
 print("Other dss2020-prefixed identifiers:", prefixes.most_common(20))
 print("Affected layers:", json.dumps(layer_findings, ensure_ascii=False))
-print("Possible unrelated QGIS stale settings count:", len(orphans))
+print("Possible unrelated QGIS stale settings count (unvalidated heuristic):", len(orphans))
+print("Orphan unique names:", report["potential_orphan_unique_names"])
+print("Orphan prefix breakdown:", report["potential_orphan_prefix_summary"])
+print("All 12 old settings have matching equivalent live entries: PASS")
 print("Possible unrelated examples:", json.dumps(orphans[:35], ensure_ascii=False))
 print("Candidate patch lines:", len(patch), "XML parse: PASS")
 Path("audit-report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
