@@ -1,0 +1,41 @@
+name: Native QGIS metadata integration
+on:
+  push:
+    branches:
+      - research/qgis-metadata-520-triage-20261123
+    paths:
+      - scripts/qgis_native_integrity_probe.py
+      - .github/workflows/qgis-native-field-check.yml
+  workflow_dispatch:
+jobs:
+  qgis:
+    runs-on: ubuntu-26.04
+    env:
+      QGIS_TEST_VERSION: stable-noble
+      PGSERVICE: pg_tww
+      COMPOSE_PROFILES: qgis
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone upstream
+        run: git clone --depth 1 https://github.com/teksi/wastewater.git /tmp/teksi-upstream
+      - name: Build QGIS and official TEKSI database
+        working-directory: /tmp/teksi-upstream
+        run: |
+          cp .env.example .env
+          docker compose --profile qgis up --build -d
+          until docker compose exec -T db pg_isready -U postgres; do sleep 2; done
+          docker compose exec -T db createdb -U postgres tww
+          docker compose run --rm pum -p pg_tww -d datamodel install -p SRID 2056
+      - name: Native QGIS project examination
+        working-directory: /tmp/teksi-upstream
+        run: |
+          docker cp "$GITHUB_WORKSPACE/scripts/qgis_native_integrity_probe.py" "$(docker compose ps -q qgis):/tmp/qgis_native_integrity_probe.py"
+          docker compose exec -T qgis sh -c "xvfb-run -a /usr/bin/python3 /tmp/qgis_native_integrity_probe.py /usr/src/project/teksi_wastewater.qgs" | tee "$GITHUB_WORKSPACE/qgis-native-summary.txt"
+          docker cp "$(docker compose ps -q qgis):/tmp/qgis-native-audit.json" "$GITHUB_WORKSPACE/qgis-native-audit.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qgis-native-metadata-evidence
+          path: |
+            qgis-native-summary.txt
+            qgis-native-audit.json
