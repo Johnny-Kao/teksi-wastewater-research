@@ -1,0 +1,75 @@
+name: TEKSI QGIS latest upstream CI parity retry
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  plugin-tests:
+    name: Upstream QGIS ${{ matrix.qgis_version }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        qgis_version: [latest]
+    env:
+      PGSERVICE: pg_tww
+      DB_NAME: tww
+      QGIS_TEST_VERSION: ${{ matrix.qgis_version }}
+      COMPOSE_PROFILES: qgis
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Johnny-Kao/wastewater
+          ref: staging/swmm-hydraulic-load-20261122
+          submodules: recursive
+          persist-credentials: false
+      - name: Setup env
+        run: cp .env.example .env
+      - name: Download Interlis libs
+        run: sudo ./plugin/scripts/download-interlis-libs.sh
+      - name: Docker build
+        run: docker compose --profile qgis up --build -d
+      - name: Wait for DB
+        run: |
+          until docker compose exec db pg_isready -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+      - name: Initialize database
+        run: |
+          docker compose exec db sh -c "dropdb -U postgres --if-exists ${DB_NAME}"
+          for attempt in $(seq 1 10); do
+            if docker compose exec db sh -c "createdb -U postgres ${DB_NAME}"; then break; fi
+            echo "Postgres temporarily unavailable after reset; retry ${attempt}/10"
+            sleep 3
+          done
+          docker compose exec db psql -U postgres -d ${DB_NAME} -Atqc "SELECT 1"
+          docker compose run pum -p ${PGSERVICE} -d datamodel install -p SRID 2056
+      - name: Run QGIS tests (except DSS) — identical upstream command
+        run: |
+          docker compose exec qgis \
+            sh -c "xvfb-run pytest \
+              /usr/src/plugin/tests/qgis/test_interlis.py \
+              -k 'not test_dss_dataset_import_export' \
+              -v -c /usr/src/plugin/pytest.ini"
+      - name: Run added SWMM hydraulic-load test in upstream QGIS container
+        run: |
+          docker compose exec qgis \
+            sh -c "xvfb-run pytest \
+              /usr/src/plugin/tests/qgis/test_swmm_hydraulic_load.py \
+              -v -c /usr/src/plugin/pytest.ini"
+      - name: Reset database
+        run: |
+          docker compose exec db sh -c "dropdb -U postgres --if-exists ${DB_NAME}"
+          docker compose exec db sh -c "createdb -U postgres ${DB_NAME}"
+          docker compose run pum -p ${PGSERVICE} -d datamodel install -p SRID 2056
+      - name: Run QGIS DSS test — identical upstream command
+        run: |
+          docker compose exec qgis \
+            sh -c "xvfb-run pytest \
+              /usr/src/plugin/tests/qgis/test_interlis.py::TestInterlis::test_dss_dataset_import_export \
+              -v -c /usr/src/plugin/pytest.ini"
+      - name: docker logs
+        if: always()
+        run: docker compose logs --tail=80 db
