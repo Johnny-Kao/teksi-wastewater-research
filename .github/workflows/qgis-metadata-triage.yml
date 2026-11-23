@@ -1,0 +1,21 @@
+name: QGIS metadata 520 triage
+on:
+  push:
+    branches:
+      - research/qgis-metadata-520-triage-20261123
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone read-only upstream
+        run: git clone --depth 1 https://github.com/teksi/wastewater.git /tmp/teksi-upstream
+      - name: Structural QGIS metadata triage
+        run: python3 scripts/triage_qgis_metadata_520.py /tmp/teksi-upstream/project/teksi_wastewater.qgs | tee metadata-520-summary.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metadata-520-research
+          path: |
+            metadata-520-summary.txt
+            metadata-520-triage.json
