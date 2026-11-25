@@ -7,6 +7,7 @@ on:
       - .github/workflows/qgis-complete-repair.yml
       - scripts/prepare_qgis_complete_repair.py
       - scripts/qgis_complete_repair_verify.py
+      - scripts/qgis_schema_variant_probe.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -150,6 +151,8 @@ jobs:
               if row["present"] and row["index"]>=0:
                   assert key in a["form_fields"] and a["form_fields"][key]["present"] and a["form_fields"][key]["index"]>=0,key
           print("EXPRESSION_ERRORS",len(invalid(b)),len(invalid(a)))
+          for key,field,old,new in changed:
+              assert key.startswith("mvw_tww_channel_") and field in ("_from_ne","_to_ne") and new==[True,old[1],old[2]], (key,field,old,new)
           print("NATIVE_OPTION_CHANGES",len(changed))
           for row in changed:print("OPTION_CHANGE",json.dumps(row))
           print("C1_C2_C5_NATIVE_PASS")
