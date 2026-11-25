@@ -6,6 +6,7 @@ on:
     paths:
       - scripts/prepare_qgis_8_fix.py
       - scripts/qgis_native_integrity_probe.py
+      - scripts/qgis_active_metadata_probe.py
       - .github/workflows/qgis-eight-repair-ab.yml
   workflow_dispatch:
 jobs:
