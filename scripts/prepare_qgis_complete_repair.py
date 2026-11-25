@@ -33,7 +33,7 @@ parser.StartElementHandler=start;parser.EndElementHandler=end;parser.Parse(raw,T
 assert next(iterator,None) is None and not stack
 changes=[]; edits={}
 def record(row,action,target=None,**extra):
-    changes.append(dict(category=row['category'],layer=row['layer'],style=row['style'],field=row['field'],action=action,target=target,**extra))
+    changes.append(dict(category=row['category'],layer=row['layer'],style=row['style'],layer_style=row['layer_style'],field=row['field'],action=action,target=target,**extra))
 def scope(row):
     lid,style=row['layer_style'].rsplit('|',1);l=layers[lid];m=l.find('map-layer-style-manager')
     if m is None or style==m.get('current'):return l
