@@ -28,7 +28,7 @@ for code in (6372,6373,6371):
 for lid,records in ((node_id,[("node-1","Node A"),("node-long","ABCDEFGHIJKLMNOPQRSTUVWXYZ")]),
                     (log_id,[("log-1","Log A")])):
     p.removeMapLayer(lid)
-    layer=QgsVectorLayer("None?field=obj_id:string&field=identifier:string",lid,"memory")
+    layer=QgsVectorLayer("None?field=obj_id:string&field=identifier:string", "vw_tww_log_card" if lid==log_id else "vw_tww_wastewater_node","memory")
     assert layer.isValid(),lid
     for record in records:
         f=QgsFeature(layer.fields());f.setAttributes(list(record))
@@ -37,6 +37,7 @@ for lid,records in ((node_id,[("node-1","Node A"),("node-long","ABCDEFGHIJKLMNOP
 def evaluate(source,attributes):
     f=QgsFeature(fields)
     for name,value in attributes.items():assert f.setAttribute(name,value),name
+    f.setValid(True)
     ctx=QgsExpressionContext()
     ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(target))
     ctx.setFeature(f)
@@ -49,6 +50,7 @@ for prefix,code in (("hc_c_",6372),("hc_o_",6373),("hc_p_",6371)):
     field=prefix+"identifier";idx=fields.indexFromName(field)
     default=target.defaultValueDefinition(idx)
     assert default.applyOnUpdate()
+    assert "get_feature" in default.expression()
     for attrs,name in (({"fk_log_card":"log-1","wn_obj_id":"node-1"},"Log A"),
                        ({"wn_obj_id":"node-1"},"Node A"),
                        ({"wn_obj_id":"node-long"},"ABCDEFGHIJKLMNOPQRSTUVWXYZ")):
