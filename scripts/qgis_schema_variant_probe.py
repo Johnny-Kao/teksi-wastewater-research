@@ -14,7 +14,7 @@ p=QgsProject.instance()
 assert p.read(sys.argv[1])
 root=ET.parse(sys.argv[1]).getroot()
 xml={e.findtext("id"):e for e in root.findall(".//projectlayers/maplayer")}
-out={"fields":{},"options":{},"form_fields":{},"expressions":{},"layers":{}}
+out={"fields":{},"options":{},"form_fields":{},"expressions":{},"layers":{},"effective_options":{}}
 for layer in p.mapLayers().values():
     if not isinstance(layer,QgsVectorLayer): continue
     assert layer.isValid(),layer.name()
@@ -27,6 +27,8 @@ for layer in p.mapLayers().values():
         fields=layer.fields()
         names={f.name() for f in fields}
         out["fields"][key]=sorted(names)
+        config=layer.editFormConfig()
+        out["effective_options"][key]={field.name():[config.readOnly(idx),config.labelOnTop(idx),str(config.reuseLastValuePolicy(idx) if hasattr(config,"reuseLastValuePolicy") else config.reuseLastValue(idx))] for idx,field in enumerate(fields)}
         out["layers"][key]={"layer":layer.name(),"style":style,"source":layer.source()}
         ctx=QgsExpressionContext()
         ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
