@@ -7,6 +7,7 @@ on:
       - scripts/prepare_qgis_8_fix.py
       - scripts/qgis_native_integrity_probe.py
       - scripts/qgis_active_metadata_probe.py
+      - scripts/qgis_saved_options_ab.py
       - .github/workflows/qgis-eight-repair-ab.yml
   workflow_dispatch:
 jobs:
@@ -64,6 +65,12 @@ jobs:
             esac
             docker compose exec -T qgis sh -c "xvfb-run -a /usr/bin/python3 /tmp/qgis_active_metadata_probe.py /usr/src/project/$project" | tee "$GITHUB_WORKSPACE/$kind-active-metadata.txt"
           done
+      - name: Compare all obsolete saved options with native QGIS
+        working-directory: /tmp/teksi-upstream
+        run: |
+          docker cp "$GITHUB_WORKSPACE/scripts/qgis_saved_options_ab.py" "$(docker compose ps -q qgis):/tmp/qgis_saved_options_ab.py"
+          docker compose exec -T qgis sh -c "xvfb-run -a /usr/bin/python3 /tmp/qgis_saved_options_ab.py /usr/src/project/teksi_wastewater.qgs" | tee "$GITHUB_WORKSPACE/saved-options-ab.txt"
+          grep -q SAVED_OPTION_AB_PASS "$GITHUB_WORKSPACE/saved-options-ab.txt"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -74,3 +81,4 @@ jobs:
             candidate-qgis-8.diff
             baseline-active-metadata.txt
             candidate-active-metadata.txt
+            saved-options-ab.txt
