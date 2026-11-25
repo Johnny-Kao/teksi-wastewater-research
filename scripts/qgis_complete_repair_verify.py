@@ -36,7 +36,14 @@ for lid,records in ((node_id,[("node-1","Node A"),("node-long","ABCDEFGHIJKLMNOP
     p.addMapLayer(layer)
 def evaluate(source,attributes):
     f=QgsFeature(fields)
-    for name,value in attributes.items():assert f.setAttribute(name,value),name
+    values=[None]*len(fields)
+    for name,value in attributes.items():
+        idx=fields.indexFromName(name)
+        assert idx>=0,(name,fields.names())
+        values[idx]=value
+    f.setAttributes(values)
+    for name,value in attributes.items():
+        assert f.attribute(fields.indexFromName(name))==value,(name,value,f.attributes())
     f.setValid(True)
     ctx=QgsExpressionContext()
     ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(target))
