@@ -159,11 +159,12 @@ def layer_patch(m):
     saved=[]
     def hold(s):
         style=parse(s.group(0))
+        if style.find('qgis') is None: return s.group(0)
         name=style.get("name")
         patched=re.sub(r'<qgis\b[^>]*>.*?</qgis>',lambda q:patch_scope(q.group(0),lname,lid,name),s.group(0),flags=re.S)
         saved.append(patched)
         return f"<!--RESEARCH_STYLE_{len(saved)-1}-->"
-    top=re.sub(r'<map-layer-style\b[^>]*>.*?</map-layer-style>',hold,raw,flags=re.S)
+    top=re.sub(r'<map-layer-style\b[^>]*?(?:/>|>.*?</map-layer-style>)',hold,raw,flags=re.S)
     top=patch_scope(top,lname,lid,current)
     for i,s in enumerate(saved):top=top.replace(f"<!--RESEARCH_STYLE_{i}-->",s,1)
     parse(top)
