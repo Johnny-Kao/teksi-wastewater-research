@@ -107,9 +107,12 @@ jobs:
         run: python3 scripts/qgis_c1_c5_classify.py /tmp/teksi-upstream variants | tee c1-c5-summary.txt
       - name: Generate targeted production patch
         run: |
+          set -o pipefail
           python3 scripts/prepare_qgis_c1_c5_candidate.py /tmp/teksi-upstream/project/teksi_wastewater.qgs candidate.qgs variants | tee candidate-summary.txt
           diff -u --label a/project/teksi_wastewater.qgs --label b/project/teksi_wastewater.qgs /tmp/teksi-upstream/project/teksi_wastewater.qgs candidate.qgs > candidate.diff || test "$?" -eq 1
           test -s candidate.diff
+          test -s candidate.review.json
+          grep -q CANDIDATE_READY candidate-summary.txt
       - uses: actions/upload-artifact@v4
         with:
           name: metadata-cross-variant-classification
