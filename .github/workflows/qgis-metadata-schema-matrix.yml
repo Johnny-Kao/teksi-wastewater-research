@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/qgis-metadata-schema-matrix.yml
       - scripts/qgis_schema_variant_probe.py
+      - scripts/qgis_c1_c5_classify.py
   workflow_dispatch:
 jobs:
   audit:
@@ -67,6 +68,13 @@ jobs:
     needs: audit
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned upstream for migration evidence
+        run: |
+          git init /tmp/teksi-upstream
+          git -C /tmp/teksi-upstream remote add origin https://github.com/teksi/wastewater.git
+          git -C /tmp/teksi-upstream fetch --depth 1 origin 0608da0ebd911f4d21a1281e930cd220a78d5f50
+          git -C /tmp/teksi-upstream checkout --detach FETCH_HEAD
       - uses: actions/download-artifact@v4
         with:
           pattern: schema-*
@@ -94,7 +102,12 @@ jobs:
               if kind=="form_fields":
                   for row in rows: print("FORM_CLASSIFICATION",json.dumps(row))
           PY
+      - name: Complete C1-C5 inventory and correlate migration records
+        run: python3 scripts/qgis_c1_c5_classify.py /tmp/teksi-upstream variants | tee c1-c5-summary.txt
       - uses: actions/upload-artifact@v4
         with:
           name: metadata-cross-variant-classification
-          path: '*-classification.json'
+          path: |
+            *-classification.json
+            c1-c5-inventory.json
+            c1-c5-summary.txt
