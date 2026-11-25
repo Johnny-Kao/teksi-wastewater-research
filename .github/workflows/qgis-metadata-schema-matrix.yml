@@ -1,0 +1,100 @@
+name: QGIS metadata across supported database variants
+on:
+  push:
+    branches:
+      - research/qgis-form-display-repair-20261123
+    paths:
+      - .github/workflows/qgis-metadata-schema-matrix.yml
+      - scripts/qgis_schema_variant_probe.py
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: standard
+            agxx: false
+            webgis: false
+          - variant: agxx
+            agxx: true
+            webgis: false
+          - variant: webgis
+            agxx: false
+            webgis: true
+    env:
+      QGIS_TEST_VERSION: stable-noble
+      PGSERVICE: pg_tww
+      COMPOSE_PROFILES: qgis
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact upstream revision
+        run: |
+          git init /tmp/teksi-upstream
+          git -C /tmp/teksi-upstream remote add origin https://github.com/teksi/wastewater.git
+          git -C /tmp/teksi-upstream fetch --depth 1 origin 0608da0ebd911f4d21a1281e930cd220a78d5f50
+          git -C /tmp/teksi-upstream checkout --detach FETCH_HEAD
+      - name: Initialize supported official database variant
+        working-directory: /tmp/teksi-upstream
+        run: |
+          cp .env.example .env
+          docker compose --profile qgis up --build -d
+          for attempt in $(seq 1 90); do
+            if docker compose exec -T db psql -U postgres -d postgres -tAc "SELECT 1" >/dev/null 2>&1 &&
+               docker compose exec -T db createdb -U postgres tww; then
+              break
+            fi
+            sleep 3
+          done
+          docker compose exec -T db psql -U postgres -d tww -tAc "SELECT 1"
+          docker compose run --rm pum -p pg_tww -d datamodel install -p SRID 2056 -p modification_agxx ${{ matrix.agxx }} -p webgis ${{ matrix.webgis }}
+      - name: Inventory live fields and expressions in every style
+        working-directory: /tmp/teksi-upstream
+        run: |
+          docker cp "$GITHUB_WORKSPACE/scripts/qgis_schema_variant_probe.py" "$(docker compose ps -q qgis):/tmp/qgis_schema_variant_probe.py"
+          docker compose exec -T qgis sh -c 'xvfb-run -a /usr/bin/python3 /tmp/qgis_schema_variant_probe.py /usr/src/project/teksi_wastewater.qgs' | tee "$GITHUB_WORKSPACE/schema-variant.txt"
+          grep -q SCHEMA_VARIANT_COMPLETE "$GITHUB_WORKSPACE/schema-variant.txt"
+          docker cp "$(docker compose ps -q qgis):/tmp/schema-variant.json" "$GITHUB_WORKSPACE/schema-variant.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: schema-${{ matrix.variant }}
+          path: |
+            schema-variant.json
+            schema-variant.txt
+  compare:
+    needs: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: schema-*
+          path: variants
+      - name: Classify every unresolved standard field against supported variants
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, collections
+          variants={p.parent.name.removeprefix("schema-"): json.loads(p.read_text()) for p in pathlib.Path("variants").glob("*/schema-variant.json")}
+          assert set(variants)=={"standard","agxx","webgis"},variants.keys()
+          base=variants["standard"]
+          others=[variants["agxx"],variants["webgis"]]
+          for kind in ("options","form_fields"):
+              rows=[]
+              for key, row in base[kind].items():
+                  if row["present"]: continue
+                  supported=[name for name,data in variants.items() if data[kind].get(key,{}).get("present")]
+                  layer_style=row["layer_style"]
+                  field=row["field"]
+                  if not supported:
+                      supported=[name for name,data in variants.items() if field in data["fields"].get(layer_style,[])]
+                  rows.append({**row,"available_in":supported,"classification":"preserve_supported_variant" if supported else "unresolved_in_all_tested_variants"})
+              pathlib.Path(kind+"-classification.json").write_text(json.dumps(rows,indent=2))
+              print(kind, collections.Counter(r["classification"] for r in rows))
+              if kind=="form_fields":
+                  for row in rows: print("FORM_CLASSIFICATION",json.dumps(row))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metadata-cross-variant-classification
+          path: '*-classification.json'
