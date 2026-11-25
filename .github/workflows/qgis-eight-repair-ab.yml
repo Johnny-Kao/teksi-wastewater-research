@@ -32,8 +32,14 @@ jobs:
         run: |
           cp .env.example .env
           docker compose --profile qgis up --build -d
-          until docker compose exec -T db pg_isready -U postgres; do sleep 2; done
-          docker compose exec -T db createdb -U postgres tww
+          for attempt in $(seq 1 90); do
+            if docker compose exec -T db psql -U postgres -d postgres -tAc "SELECT 1" >/dev/null 2>&1 &&
+               docker compose exec -T db createdb -U postgres tww; then
+              break
+            fi
+            sleep 3
+          done
+          docker compose exec -T db psql -U postgres -d tww -tAc "SELECT 1"
           docker compose run --rm pum -p pg_tww -d datamodel install -p SRID 2056
       - name: Run baseline and candidate on same QGIS and database
         working-directory: /tmp/teksi-upstream
