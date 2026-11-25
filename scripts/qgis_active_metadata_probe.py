@@ -74,6 +74,43 @@ for layer in project.mapLayers().values():
             value = exp.evaluate(ctx) if prepared else None
             print("DISPLAY_FIXTURE", json.dumps(dict(layer=layer.name(), target=target,
                 prepared=prepared, value=str(value), error=exp.evalErrorString())))
+# Saved styles are switchable configurations, not necessarily dead metadata.
+# Inspect each style through QGIS itself and restore the original selection.
+for layer in project.mapLayers().values():
+    if not hasattr(layer, "fields"):
+        continue
+    manager = layer.styleManager()
+    original = manager.currentStyle()
+    for style in manager.styles():
+        if not manager.setCurrentStyle(style):
+            print("STYLE_SWITCH_FAILED", layer.name(), style)
+            continue
+        counts["styles_tested"] += 1
+        fields = layer.fields()
+        names = {f.name() for f in fields}
+        def inspect(element):
+            if hasattr(element, "children"):
+                for child in element.children():
+                    inspect(child)
+            if hasattr(element, "idx") and hasattr(element, "name"):
+                idx = element.idx()
+                name = element.name()
+                if idx < 0 or idx >= len(fields) or fields[idx].name() != name:
+                    counts["style_invalid_form"] += 1
+                    print("STYLE_INVALID_FORM", json.dumps(dict(layer=layer.name(),
+                        style=style, field=name, index=idx, present=name in names)))
+        for tab in layer.editFormConfig().tabs():
+            inspect(tab)
+        ctx = QgsExpressionContext()
+        ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
+        ctx.setFeature(QgsFeature(fields))
+        exp = QgsExpression(layer.displayExpression())
+        if layer.displayExpression() and not exp.prepare(ctx):
+            counts["style_invalid_display"] += 1
+            print("STYLE_INVALID_DISPLAY", json.dumps(dict(layer=layer.name(),
+                style=style, expression=layer.displayExpression(),
+                error=exp.evalErrorString())))
+    manager.setCurrentStyle(original)
 for finding in findings:
     print("EXPRESSION_LEAD", json.dumps(finding, ensure_ascii=False))
 print("AUDIT_COUNTS", json.dumps(dict(counts), sort_keys=True))
