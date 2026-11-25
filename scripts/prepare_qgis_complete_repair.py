@@ -89,7 +89,17 @@ for row in rows:
             targets=s.xpath('./'+tag+'/field[@name=$n]',n=new) if new else []
             for node in s.xpath('./'+tag+'/field[@name=$n]',n=old):
                 if new and not targets:
-                    replace_attr(node,'name',new);counts['migrated']+=1
+                    # Existing default-style settings are authoritative for shared fields.
+                    # Never revive an old automatic input reuse policy on hydraulic data.
+                    lid,style=row['layer_style'].rsplit('|',1)
+                    base=layers[lid]
+                    canonical=base.xpath('./'+tag+'/field[@name=$n]',n=new) if s is not base else []
+                    replace_attr(node,'name',new)
+                    if canonical:
+                        for attr,value in canonical[0].attrib.items():
+                            if attr!='name' and attr in node.attrib and node.get(attr)!=value:
+                                replace_attr(node,attr,value)
+                    counts['migrated']+=1
                 else:
                     remove(node);counts['kept_current_target' if targets else 'removed_unresolved']+=1
         assert sum(counts.values()),row
@@ -102,8 +112,8 @@ for row in rows:
         status={'hc_c_identifier':6372,'hc_o_identifier':6373,'hc_p_identifier':6371}[field]
         node=s.xpath('./defaults/default[@field=$f]',f=field)[0]
         assert node.get('expression')==row['expression']
-        base='coalesce(attribute(get_feature(\'vw_tww_log_card_10cf0437_ed7a_4299_adc6_9d00c3f1703f\',\'obj_id\',"fk_log_card"),\'identifier\'),attribute(get_feature(\'vw_tww_wastewater_node\',\'obj_id\',"wn_obj_id"),\'identifier\'))'
-        label=f"attribute(get_feature('hydraulic_char_data_status_30c0bb3f_0f3d_4219_8fcd_37605e554496','code',{status}),'value_en')"
+        base='coalesce(attribute(get_feature(\'vw_tww_log_card\',\'obj_id\',"fk_log_card"),\'identifier\'),attribute(get_feature(\'vw_tww_wastewater_node\',\'obj_id\',"wn_obj_id"),\'identifier\'))'
+        label=f"attribute(get_feature('hydraulic_char_data_status','code',{status}),'value_en')"
         expr=f"left({base} || '-' || {label},20)"
         replace_attr(node,'expression',expr);record(row,'repair_default',expr,status_code=status)
     elif cat=='C4':
