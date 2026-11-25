@@ -19,7 +19,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Clone upstream and prepare isolated candidate
         run: |
-          git clone --depth 1 https://github.com/teksi/wastewater.git /tmp/teksi-upstream
+          git init /tmp/teksi-upstream
+          git -C /tmp/teksi-upstream remote add origin https://github.com/teksi/wastewater.git
+          git -C /tmp/teksi-upstream fetch --depth 1 origin 0608da0ebd911f4d21a1281e930cd220a78d5f50
+          git -C /tmp/teksi-upstream checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/teksi-upstream rev-parse HEAD)" = 0608da0ebd911f4d21a1281e930cd220a78d5f50
           python3 scripts/prepare_qgis_8_fix.py /tmp/teksi-upstream/project/teksi_wastewater.qgs /tmp/teksi-upstream/project/teksi_wastewater_research_candidate.qgs
           diff -u /tmp/teksi-upstream/project/teksi_wastewater.qgs /tmp/teksi-upstream/project/teksi_wastewater_research_candidate.qgs > candidate-qgis-8.diff || test "$?" -eq 1
       - name: Build and initialize native QGIS+PUM test database
@@ -42,6 +46,17 @@ jobs:
           grep -q 'INVALID_FORM_FIELDS_TOTAL 0' "$GITHUB_WORKSPACE/candidate-qgis.txt"
           grep -q 'RELATION_SUMMARY 57 invalid 0' "$GITHUB_WORKSPACE/candidate-qgis.txt"
           grep -q 'PROJECT_READ True LAYER_COUNT 221' "$GITHUB_WORKSPACE/candidate-qgis.txt"
+      - name: Audit active native field expressions on both projects
+        working-directory: /tmp/teksi-upstream
+        run: |
+          docker cp "$GITHUB_WORKSPACE/scripts/qgis_active_metadata_probe.py" "$(docker compose ps -q qgis):/tmp/qgis_active_metadata_probe.py"
+          for kind in baseline candidate; do
+            case "$kind" in
+              baseline) project=teksi_wastewater.qgs ;;
+              candidate) project=teksi_wastewater_research_candidate.qgs ;;
+            esac
+            docker compose exec -T qgis sh -c "xvfb-run -a /usr/bin/python3 /tmp/qgis_active_metadata_probe.py /usr/src/project/$project" | tee "$GITHUB_WORKSPACE/$kind-active-metadata.txt"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -50,3 +65,5 @@ jobs:
             baseline-qgis.txt
             candidate-qgis.txt
             candidate-qgis-8.diff
+            baseline-active-metadata.txt
+            candidate-active-metadata.txt
