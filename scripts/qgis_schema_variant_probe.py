@@ -32,11 +32,14 @@ for layer in p.mapLayers().values():
         out["layers"][key]={"layer":layer.name(),"style":style,"source":layer.source()}
         ctx=QgsExpressionContext()
         ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
-        ctx.setFeature(QgsFeature(fields))
+        blank=QgsFeature(fields)
+        blank.setAttributes([None]*len(fields))
+        blank.setValid(True)
+        ctx.setFeature(blank)
         def inspect(kind, owner, source):
             if not source: return
             exp=QgsExpression(source)
-            missing=sorted(set(exp.referencedColumns())-names-{"#!"})
+            missing=sorted(set(exp.referencedColumns())-names-{"#!","#!allattributes!#"})
             ready=exp.prepare(ctx)
             value=exp.evaluate(ctx) if ready else None
             out["expressions"][key+"|"+kind+"|"+owner]=dict(layer=layer.name(),style=style,layer_style=key,kind=kind,field=owner,expression=source,missing=missing,prepared=ready,parser_error=exp.parserErrorString(),eval_error=exp.evalErrorString(),value=str(value))
