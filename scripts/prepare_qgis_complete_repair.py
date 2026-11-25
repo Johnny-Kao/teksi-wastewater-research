@@ -88,20 +88,17 @@ for row in rows:
         for tag in ('editable','labelOnTop','reuseLastValue','reuseLastValuePolicy'):
             targets=s.xpath('./'+tag+'/field[@name=$n]',n=new) if new else []
             for node in s.xpath('./'+tag+'/field[@name=$n]',n=old):
-                if new and not targets:
-                    # Existing default-style settings are authoritative for shared fields.
-                    # Never revive an old automatic input reuse policy on hydraulic data.
-                    lid,style=row['layer_style'].rsplit('|',1)
-                    base=layers[lid]
-                    canonical=base.xpath('./'+tag+'/field[@name=$n]',n=new) if s is not base else []
+                # Preserve all effective policies unless a source-backed change is
+                # explicitly intended. The channel endpoint aliases are derived
+                # identifiers on a materialized view, not editable input fields.
+                restore_readonly=(name=="mvw_tww_channel" and old in ("_from_node","_to_node")
+                                  and tag=="editable" and node.get("editable")=="0")
+                if new and not targets and restore_readonly:
                     replace_attr(node,'name',new)
-                    if canonical:
-                        for attr,value in canonical[0].attrib.items():
-                            if attr!='name' and attr in node.attrib and node.get(attr)!=value:
-                                replace_attr(node,attr,value)
                     counts['migrated']+=1
                 else:
-                    remove(node);counts['kept_current_target' if targets else 'removed_unresolved']+=1
+                    remove(node)
+                    counts['kept_current_target' if new else 'removed_unresolved']+=1
         assert sum(counts.values()),row
         record(row,'migrate_or_remove_obsolete_options',new,**counts)
 # Preserve documented identifier + status convention. Codes follow the
