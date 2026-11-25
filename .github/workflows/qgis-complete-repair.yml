@@ -1,0 +1,172 @@
+name: Complete QGIS C1-C5 repair verification
+on:
+  push:
+    branches:
+      - research/qgis-form-display-repair-20261123
+    paths:
+      - .github/workflows/qgis-complete-repair.yml
+      - scripts/prepare_qgis_complete_repair.py
+      - scripts/qgis_complete_repair_verify.py
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: schema-*
+          path: variants
+          run-id: 45705907339
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: metadata-cross-variant-classification
+          path: inventory
+          run-id: 45705907339
+          github-token: ${{ github.token }}
+      - name: Generate exact project patch
+        run: |
+          set -euo pipefail
+          git init /tmp/teksi-upstream
+          git -C /tmp/teksi-upstream remote add origin https://github.com/teksi/wastewater.git
+          git -C /tmp/teksi-upstream fetch --depth 1 origin 0608da0ebd911f4d21a1281e930cd220a78d5f50
+          git -C /tmp/teksi-upstream checkout --detach FETCH_HEAD
+          python3 -c 'import lxml' || (sudo apt-get update && sudo apt-get install -y python3-lxml)
+          python3 scripts/prepare_qgis_8_fix.py /tmp/teksi-upstream/project/teksi_wastewater.qgs initial.qgs
+          python3 scripts/prepare_qgis_complete_repair.py initial.qgs complete.qgs inventory/c1-c5-inventory.json variants | tee complete-summary.txt
+          grep -q COMPLETE_REPAIR_READY complete-summary.txt
+          diff -u --label a/project/teksi_wastewater.qgs --label b/project/teksi_wastewater.qgs /tmp/teksi-upstream/project/teksi_wastewater.qgs complete.qgs > complete.diff || test "$?" -eq 1
+          test -s complete.diff
+          git -C /tmp/teksi-upstream apply --check "$GITHUB_WORKSPACE/complete.diff"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: full-repair-patch
+          if-no-files-found: error
+          path: |
+            complete.qgs
+            complete.diff
+            complete.review.json
+            complete-summary.txt
+  validate:
+    needs: prepare
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: standard
+            agxx: false
+            webgis: false
+          - variant: agxx
+            agxx: true
+            webgis: false
+          - variant: webgis
+            agxx: false
+            webgis: true
+    env:
+      QGIS_TEST_VERSION: stable-noble
+      PGSERVICE: pg_tww
+      COMPOSE_PROFILES: qgis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: full-repair-patch
+          path: patch
+      - name: Fetch pinned upstream
+        run: |
+          git init /tmp/teksi-upstream
+          git -C /tmp/teksi-upstream remote add origin https://github.com/teksi/wastewater.git
+          git -C /tmp/teksi-upstream fetch --depth 1 origin 0608da0ebd911f4d21a1281e930cd220a78d5f50
+          git -C /tmp/teksi-upstream checkout --detach FETCH_HEAD
+          cp patch/complete.qgs /tmp/teksi-upstream/project/teksi_wastewater_candidate.qgs
+          git -C /tmp/teksi-upstream apply --check "$GITHUB_WORKSPACE/patch/complete.diff"
+      - name: Initialize native database
+        working-directory: /tmp/teksi-upstream
+        run: |
+          cp .env.example .env
+          docker compose --profile qgis up --build -d
+          for attempt in $(seq 1 90); do
+            if docker compose exec -T db psql -U postgres -d postgres -tAc "SELECT 1" >/dev/null 2>&1 &&
+               docker compose exec -T db createdb -U postgres tww; then
+              break
+            fi
+            sleep 3
+          done
+          docker compose exec -T db psql -U postgres -d tww -tAc "SELECT 1"
+          docker compose run --rm pum -p pg_tww -d datamodel install -p SRID 2056 -p modification_agxx ${{ matrix.agxx }} -p webgis ${{ matrix.webgis }}
+      - name: Compare all native styles and fields before and after
+        working-directory: /tmp/teksi-upstream
+        run: |
+          set -euo pipefail
+          docker cp "$GITHUB_WORKSPACE/scripts/qgis_schema_variant_probe.py" "$(docker compose ps -q qgis):/tmp/qgis_schema_variant_probe.py"
+          docker cp "$GITHUB_WORKSPACE/scripts/qgis_complete_repair_verify.py" "$(docker compose ps -q qgis):/tmp/qgis_complete_repair_verify.py"
+          for version in baseline candidate; do
+            if [ "$version" = baseline ]; then qgs=teksi_wastewater.qgs; else qgs=teksi_wastewater_candidate.qgs; fi
+            docker compose exec -T qgis sh -c "xvfb-run -a /usr/bin/python3 /tmp/qgis_schema_variant_probe.py /usr/src/project/$qgs" | tee "$GITHUB_WORKSPACE/$version.txt"
+            grep -q SCHEMA_VARIANT_COMPLETE "$GITHUB_WORKSPACE/$version.txt"
+            docker cp "$(docker compose ps -q qgis):/tmp/schema-variant.json" "$GITHUB_WORKSPACE/$version.json"
+          done
+      - name: Assert all five repair categories and preserve legitimate settings
+        run: |
+          python3 - <<'PY'
+          import json,collections
+          b=json.load(open("baseline.json"))
+          a=json.load(open("candidate.json"))
+          report=json.load(open("patch/complete.review.json"))["changes"]
+          assert b["fields"]==a["fields"],"layer schemas changed"
+          def invalid(x):
+              return {k for k,r in x["expressions"].items() if not r["prepared"] or r["missing"] or r["parser_error"]}
+          assert not invalid(a),invalid(a)
+          allowed=set()
+          for row in report:
+              key=row["layer_style"];field=row["field"];oldkey=key+"|"+field;target=row.get("target")
+              if row["category"]=="C2":
+                  if row["action"]=="preserve_supported_extension":
+                      assert a["form_fields"].get(oldkey)==b["form_fields"].get(oldkey),oldkey
+                  else:
+                      assert oldkey not in a["form_fields"],oldkey
+                      if target and target in a["fields"][key]:
+                          entry=a["form_fields"].get(key+"|"+target)
+                          assert entry and entry["present"] and entry["index"]>=0,(row,entry)
+              if row["category"]=="C5":
+                  if row["action"]=="preserve_supported_extension":
+                      assert a["options"].get(oldkey)==b["options"].get(oldkey),oldkey
+                  else:
+                      assert oldkey not in a["options"],oldkey
+                      if target and row.get("migrated",0):allowed.add((key,target))
+          changed=[]
+          for key,fields in b["effective_options"].items():
+              for field,old in fields.items():
+                  new=a["effective_options"][key][field]
+                  if old!=new:
+                      assert (key,field) in allowed,(key,field,old,new)
+                      changed.append((key,field,old,new))
+          for key,row in b["form_fields"].items():
+              if row["present"] and row["index"]>=0:
+                  assert key in a["form_fields"] and a["form_fields"][key]["present"] and a["form_fields"][key]["index"]>=0,key
+          print("EXPRESSION_ERRORS",len(invalid(b)),len(invalid(a)))
+          print("NATIVE_OPTION_CHANGES",len(changed))
+          for row in changed:print("OPTION_CHANGE",json.dumps(row))
+          print("C1_C2_C5_NATIVE_PASS")
+          PY
+      - name: Test actual identifier and constraint expressions
+        working-directory: /tmp/teksi-upstream
+        run: |
+          set -euo pipefail
+          docker compose exec -T qgis sh -c 'xvfb-run -a /usr/bin/python3 /tmp/qgis_complete_repair_verify.py /usr/src/project/teksi_wastewater_candidate.qgs' | tee "$GITHUB_WORKSPACE/native-expressions.txt"
+          grep -q NATIVE_C3_C4_PASS "$GITHUB_WORKSPACE/native-expressions.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-repair-validation-${{ matrix.variant }}
+          path: |
+            baseline.json
+            candidate.json
+            baseline.txt
+            candidate.txt
+            native-expressions.txt
