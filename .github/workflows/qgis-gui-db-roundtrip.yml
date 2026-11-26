@@ -80,7 +80,7 @@ jobs:
             test "$(git -C "/tmp/teksi-$dep" rev-parse HEAD)" = "$revision"
             docker cp "/tmp/teksi-$dep" "$(docker compose ps -q qgis):/tmp/teksi-$dep"
           done
-          docker compose exec -T -u root qgis sh -c 'apt-get update && apt-get install -y qml-module-qtquick-controls qml-module-qtquick-dialogs qml-module-qtquick-layouts'
+          docker compose exec -T -u root qgis sh -c 'apt-get update && apt-get install -y python3-pyqt5.qtquick qml-module-qtquick-controls qml-module-qtquick-dialogs qml-module-qtquick-layouts'
       - name: Native GUI and database A/B
         working-directory: /tmp/teksi-upstream
         run: |
