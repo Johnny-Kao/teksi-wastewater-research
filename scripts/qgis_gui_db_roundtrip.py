@@ -129,6 +129,9 @@ def rollback_layer(obj):
     assert obj.rollBack(), obj.name()
     obj.reload()
 
+def oid(table):
+    return scalar("SELECT tww_app.generate_oid(%s,%s)", ("tww_od",table))
+
 def fixture():
     # Use the same view and geometry construction as upstream test_views.py.
     ws = scalar("""
@@ -138,23 +141,25 @@ def fixture():
         RETURNING obj_id
     """, (prefix,))
     wn = scalar("SELECT wn_obj_id FROM tww_app.vw_tww_wastewater_structure WHERE obj_id=%s", (ws,))
-    log = prefix + "LOG"
+    log = oid("log_card")
     sql("INSERT INTO tww_od.log_card (obj_id,fk_pwwf_wastewater_node) VALUES (%s,%s)", (log,wn))
+    hc_ids = {}
     for suffix, status in (("C",6372),("O",6373),("P",6371)):
+        hc_ids[suffix] = oid("hydraulic_char_data")
         sql("""INSERT INTO tww_od.hydraulic_char_data
             (obj_id,identifier,fk_wastewater_node,status,pump_flow_min,pump_flow_max)
             VALUES (%s,%s,%s,%s,5,10)""",
-            (prefix+suffix, "old-"+suffix, wn,status))
-    cat = prefix+"CAT"
+            (hc_ids[suffix], "old-"+suffix, wn,status))
+    cat = oid("catchment_area_totals")
     sql("""INSERT INTO tww_od.catchment_area_totals
             (obj_id,identifier,fk_hydraulic_char_data,fk_log_card)
-            VALUES (%s,%s,%s,%s)""", (cat,prefix,prefix+"C",log))
-    ov = prefix+"PUMP"
-    sql("INSERT INTO tww_od.overflow (obj_id,identifier,fk_wastewater_node) VALUES (%s,%s,%s)",(ov,ov,wn))
+            VALUES (%s,%s,%s,%s)""", (cat,prefix,hc_ids["C"],log))
+    ov = oid("overflow")
+    sql("INSERT INTO tww_od.overflow (obj_id,identifier,fk_wastewater_node) VALUES (%s,%s,%s)",(ov,prefix+"PUMP",wn))
     sql("INSERT INTO tww_od.pump (obj_id,pump_flow_min_single,pump_flow_max_single) VALUES (%s,5,10)",(ov,))
     db.commit()
     print("FIXTURE_COMMITTED", ws, wn, log, cat, ov, flush=True)
-    return ws,wn,log,cat,ov
+    return ws,wn,log,cat,ov,hc_ids
 
 def check_forms():
     groups = collections.defaultdict(list)
@@ -212,7 +217,7 @@ if case=="forms":
     print("GUI_DB_COMPLETE_PASS",version,variant,case,flush=True)
     sys.exit(0)
 try:
-    ws,wn,log,cat,ov=fixture()
+    ws,wn,log,cat,ov,hc_ids=fixture()
 except Exception:
     db.rollback()
     traceback.print_exc()
@@ -342,7 +347,7 @@ def check_catchment_write():
         change(form,"hc_c_pump_flow_min",8)
         assert form.save()
         rollback_layer(target)
-        assert float(scalar("SELECT pump_flow_min FROM tww_od.hydraulic_char_data WHERE obj_id=%s",(prefix+"C",)))==6
+        assert float(scalar("SELECT pump_flow_min FROM tww_od.hydraulic_char_data WHERE obj_id=%s",(hc_ids["C"],)))==6
         db.commit()
         print("CATCHMENT_ROLLBACK_READBACK",6,flush=True)
     finally:
@@ -354,7 +359,7 @@ if case in ("all","catchment"):
 
 def check_display():
     # Actual rows, not synthetic feature names, for all three repaired displays.
-    event=prefix+"ME"
+    event=oid("maintenance_event")
     sql("INSERT INTO tww_od.maintenance_event (obj_id,identifier) VALUES (%s,%s)",(event,event))
     relation_id=scalar("""INSERT INTO tww_od.re_maintenance_event_wastewater_structure
         (fk_maintenance_event,fk_wastewater_structure) VALUES (%s,%s) RETURNING id""",(event,ws))
@@ -392,7 +397,7 @@ if case in ("all","display"):
 
 def check_pump_insert():
     # Exercise an actual add-feature form, followed by provider commit/readback.
-    oid=prefix+"NEW"
+    new_oid=oid("overflow")
     overflow.reload()
     manager=overflow.styleManager()
     oldstyle=manager.currentStyle()
@@ -400,7 +405,7 @@ def check_pump_insert():
         assert manager.setCurrentStyle("AG-64/96")
     assert overflow.startEditing()
     try:
-        values={"obj_id":oid,"identifier":oid,"overflow_type":"pump","fk_wastewater_node":wn}
+        values={"obj_id":new_oid,"identifier":prefix+"NEW","overflow_type":"pump","fk_wastewater_node":wn}
         attrs={overflow.fields().indexFromName(n):v for n,v in values.items()}
         assert -1 not in attrs,values
         ctx=QgsExpressionContext()
@@ -419,7 +424,7 @@ def check_pump_insert():
             change(form,"pu_pump_flow_max_single",9)
             assert form.save(),"QGIS add-feature form save failed"
             commit_layer(overflow)
-            rows=sql("SELECT pump_flow_min_single,pump_flow_max_single FROM tww_od.pump WHERE obj_id=%s",(oid,),True)
+            rows=sql("SELECT pump_flow_min_single,pump_flow_max_single FROM tww_od.pump WHERE obj_id=%s",(new_oid,),True)
             assert len(rows)==1 and tuple(map(float,rows[0]))==(4,9),rows
             db.commit()
             print("PUMP_INSERT_READBACK",rows,flush=True)
