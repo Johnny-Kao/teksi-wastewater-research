@@ -101,6 +101,7 @@ def empty(obj):
 def form_for(obj, f):
     context = QgsAttributeEditorContext()
     context.setMapCanvas(canvas)
+    context.setFormMode(QgsAttributeEditorContext.StandaloneDialog)
     print("FORM_CONSTRUCT",obj.id(),obj.styleManager().currentStyle(),flush=True)
     form = QgsAttributeForm(obj, f, context)
     form.resize(1100, 800)
@@ -142,6 +143,21 @@ def evaluate(obj, f, expr):
     value = e.evaluate(ctx)
     assert not e.hasEvalError(), e.evalErrorString()
     return value
+
+def save_form(form):
+    # QGIS Embed mode can return success without writing when constraints fail.
+    # Use the actual dialog contract and report errors; never accept an empty save.
+    for name, ws in wrappers(form).items():
+        for w in ws:
+            if not w.isValidConstraint():
+                print("FORM_CONSTRAINT_BEFORE_SAVE",name,repr(w.value()),w.constraintFailureReason(),w.constraintResult(),flush=True)
+    result = form.saveWithDetails()
+    print("FORM_SAVE_RESULT",repr(result),flush=True)
+    if isinstance(result,tuple):
+        assert result[0],result
+    else:
+        assert result,result
+    return True
 
 def commit_layer(obj):
     print("COMMIT_STATE",obj.name(),"editable",obj.isEditable(),"modified",obj.isModified(),"transaction_mode",project.transactionMode(),flush=True)
@@ -318,7 +334,7 @@ def check_pump_write():
                     return
             form_field(form,name)
             change(form,name,6)
-            assert form.save(), "QGIS attribute form save failed"
+            assert save_form(form), "QGIS attribute form save failed"
             assert float(feature(overflow,ov)[name])==6,("pump edit not staged",feature(overflow,ov)[name])
             commit_layer(overflow)
             assert float(scalar("SELECT pump_flow_min_single FROM tww_od.pump WHERE obj_id=%s",(ov,)))==6
@@ -330,7 +346,7 @@ def check_pump_write():
         form=form_for(overflow,feature(overflow,ov))
         try:
             change(form,name,8)
-            assert form.save()
+            assert save_form(form)
             rollback_layer(overflow)
             assert float(scalar("SELECT pump_flow_min_single FROM tww_od.pump WHERE obj_id=%s",(ov,)))==6
             db.commit()
@@ -357,7 +373,7 @@ def check_catchment_write():
                 actual=form.currentFormFeature()[p+"identifier"]
                 expected=(prefix+"-"+labels[code])[:20]
                 assert actual==expected,(p,actual,expected)
-        assert form.save(), "QGIS catchment form save failed"
+        assert save_form(form), "QGIS catchment form save failed"
         staged=feature(target,cat)
         for p in ("hc_c_","hc_o_","hc_p_"):
             assert float(staged[p+"pump_flow_min"])==6,("catchment edit not staged",p,staged[p+"pump_flow_min"])
@@ -377,7 +393,7 @@ def check_catchment_write():
     form=form_for(target,feature(target,cat))
     try:
         change(form,"hc_c_pump_flow_min",8)
-        assert form.save()
+        assert save_form(form)
         rollback_layer(target)
         assert float(scalar("SELECT pump_flow_min FROM tww_od.hydraulic_char_data WHERE obj_id=%s",(hc_ids["C"],)))==6
         db.commit()
@@ -454,7 +470,7 @@ def check_pump_insert():
             form_field(form,minimum)
             change(form,minimum,4)
             change(form,"pu_pump_flow_max_single",9)
-            assert form.save(),"QGIS add-feature form save failed"
+            assert save_form(form),"QGIS add-feature form save failed"
             print("PUMP_ADD_BUFFER",len(overflow.editBuffer().addedFeatures()) if overflow.editBuffer() else None,flush=True)
             commit_layer(overflow)
             rows=sql("SELECT pump_flow_min_single,pump_flow_max_single FROM tww_od.pump WHERE obj_id=%s",(new_oid,),True)
