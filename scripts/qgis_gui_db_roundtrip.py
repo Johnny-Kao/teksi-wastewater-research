@@ -30,7 +30,7 @@ except ImportError:
 
 project_path, manifest_path, version, variant = sys.argv[1:5]
 case = sys.argv[5] if len(sys.argv)>5 else "all"
-assert case in ("all","forms","display","constraints","pump","catchment","insert")
+assert case in ("all","forms","display","constraints","pump","catchment","insert","catchment_sql")
 assert version in ("baseline", "candidate")
 from qgis.utils import iface
 assert iface is not None, "Run inside the QGIS desktop application"
@@ -57,10 +57,11 @@ assert project.read(project_path), project_path
 manifest = json.loads(Path(manifest_path).read_text())["changes"]
 db = pg.connect("service=pg_tww")
 db.autocommit = False
+QgsApplication.messageLog().messageReceived.connect(lambda msg,tag,level: print("QGIS_LOG",tag,level,msg,flush=True))
 errors = []
 results = []
 tag = "B" if version == "baseline" else "A"
-prefix = "TWWQA" + tag + {"all":"X","forms":"F","display":"D","constraints":"C","pump":"P","catchment":"T","insert":"I"}[case]
+prefix = "TWWQA" + tag + {"all":"X","forms":"F","display":"D","constraints":"C","pump":"P","catchment":"T","insert":"I","catchment_sql":"S"}[case]
 
 def sql(query, params=(), fetch=False):
     with db.cursor() as cur:
@@ -194,7 +195,7 @@ def fixture():
         sql("""INSERT INTO tww_od.hydraulic_char_data
             (obj_id,identifier,fk_wastewater_node,status,pump_flow_min,pump_flow_max)
             VALUES (%s,%s,%s,%s,5,10)""",
-            (hc_ids[suffix], "old-"+suffix, wn,status))
+            (hc_ids[suffix], prefix+"-old-"+suffix, wn,status))
     cat = oid("catchment_area_totals")
     sql("""INSERT INTO tww_od.catchment_area_totals
             (obj_id,identifier,fk_hydraulic_char_data)
@@ -364,12 +365,51 @@ def check_pump_write():
 if case in ("all","pump"):
     record("C2_C5_pump_form_commit_and_rollback",check_pump_write)
 
+def check_catchment_sql():
+    # Independent control against the exact unmodified installed view trigger.
+    # Preserve NULL owner/provider/discharge fields; never patch the SQL under test.
+    trigger_defs = sql("""SELECT t.tgname, pg_get_functiondef(t.tgfoid)
+        FROM pg_trigger t WHERE t.tgrelid='tww_app.vw_tww_catchment_area_totals'::regclass
+        AND NOT t.tgisinternal AND (t.tgtype & 16) <> 0""",fetch=True)
+    for name, body in trigger_defs:
+        print("INSTALLED_UPDATE_TRIGGER",name,body,flush=True)
+    assert trigger_defs, "No installed UPDATE trigger"
+    db.commit()
+    try:
+        rows=sql("""UPDATE tww_app.vw_tww_catchment_area_totals
+            SET hc_c_pump_flow_min=6,hc_o_pump_flow_min=6,hc_p_pump_flow_min=6
+            WHERE obj_id=%s RETURNING obj_id""",(cat,),True)
+        assert len(rows)==1,rows
+        actual=sql("SELECT status,pump_flow_min FROM tww_od.hydraulic_char_data WHERE fk_wastewater_node=%s ORDER BY status",(wn,),True)
+        print("SQL_VIEW_WRITE_READBACK",actual,flush=True)
+        assert len(actual)==3 and all(float(flow)==6 for _,flow in actual),actual
+        db.commit()
+    except Exception as exc:
+        print("SQL_VIEW_ERROR",getattr(exc,"sqlstate",getattr(exc,"pgcode",None)),str(exc),flush=True)
+        db.rollback()
+        raise
+    try:
+        sql("UPDATE tww_app.vw_tww_catchment_area_totals SET hc_c_pump_flow_min=8 WHERE obj_id=%s",(cat,))
+        assert float(scalar("SELECT pump_flow_min FROM tww_od.hydraulic_char_data WHERE obj_id=%s",(hc_ids["C"],)))==8
+    finally:
+        db.rollback()
+    assert float(scalar("SELECT pump_flow_min FROM tww_od.hydraulic_char_data WHERE obj_id=%s",(hc_ids["C"],)))==6
+    db.commit()
+    print("SQL_VIEW_ROLLBACK_READBACK",6,flush=True)
+
+if case in ("catchment_sql",):
+    record("CATCHMENT_SQL_VIEW_CONTROL",check_catchment_sql)
+
 def check_catchment_write():
     # Save via the unmodified application's view and INSTEAD OF triggers.
     # Never substitute a direct table write for an unsuccessful view write.
     target.reload()
     assert target.startEditing()
-    form=form_for(target,feature(target,cat))
+    initial=feature(target,cat)
+    form=form_for(target,initial)
+    saved=[]
+    form.featureSaved.connect(lambda f: saved.append(QgsFeature(f)))
+    print("CATCHMENT_TRANSACTION_MODE",project.transactionMode(),"feature",initial.id(),initial.isValid(),flush=True)
     try:
         for p,code in (("hc_c_",6372),("hc_o_",6373),("hc_p_",6371)):
             change(form,p+"pump_flow_min",6)
@@ -377,7 +417,12 @@ def check_catchment_write():
                 actual=form.currentFormFeature()[p+"identifier"]
                 expected=(prefix+"-"+labels[code])[:20]
                 assert actual==expected,(p,actual,expected)
+        for p in ("hc_c_","hc_o_","hc_p_"):
+            name=p+"pump_flow_min"; idx=target.fields().indexFromName(name)
+            print("CATCHMENT_FIELD_EDITABILITY",name,QgsVectorLayerUtils.fieldIsEditable(target,idx,initial),target.editFormConfig().readOnly(idx),repr(form.currentFormFeature()[name]),flush=True)
         assert save_form(form), "QGIS catchment form save failed"
+        print("CATCHMENT_SAVED_SIGNAL",[(f.id(),[f[p+"pump_flow_min"] for p in ("hc_c_","hc_o_","hc_p_")]) for f in saved],flush=True)
+        print("CATCHMENT_PROVIDER_ERRORS",[str(e.message()) for e in target.dataProvider().errors()],flush=True)
         staged=feature(target,cat)
         for p in ("hc_c_","hc_o_","hc_p_"):
             assert float(staged[p+"pump_flow_min"])==6,("catchment edit not staged",p,staged[p+"pump_flow_min"])
