@@ -1,0 +1,86 @@
+name: QGIS GUI and PostgreSQL roundtrip
+on:
+  push:
+    branches:
+      - research/qgis-form-display-repair-20261123
+    paths:
+      - .github/workflows/qgis-gui-db-roundtrip.yml
+      - scripts/qgis_gui_db_roundtrip.py
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  roundtrip:
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: standard
+            agxx: false
+            webgis: false
+          - variant: agxx
+            agxx: true
+            webgis: false
+          - variant: webgis
+            agxx: false
+            webgis: true
+    env:
+      QGIS_TEST_VERSION: stable-noble
+      PGSERVICE: pg_tww
+      COMPOSE_PROFILES: qgis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: full-repair-patch
+          path: patch
+          run-id: 45710496196
+          github-token: ${{ github.token }}
+      - name: Fetch exact tested upstream and patch
+        run: |
+          git init /tmp/teksi-upstream
+          git -C /tmp/teksi-upstream remote add origin https://github.com/teksi/wastewater.git
+          git -C /tmp/teksi-upstream fetch --depth 1 origin 0608da0ebd911f4d21a1281e930cd220a78d5f50
+          git -C /tmp/teksi-upstream checkout --detach FETCH_HEAD
+          git -C /tmp/teksi-upstream apply --check "$GITHUB_WORKSPACE/patch/complete.diff"
+          cp patch/complete.qgs /tmp/teksi-upstream/project/teksi_wastewater_candidate.qgs
+      - name: Initialize disposable native database
+        working-directory: /tmp/teksi-upstream
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          docker compose --profile qgis up --build -d
+          for attempt in $(seq 1 90); do
+            if docker compose exec -T db psql -U postgres -d postgres -tAc "SELECT 1" >/dev/null 2>&1 &&
+               docker compose exec -T db createdb -U postgres tww; then
+              break
+            fi
+            sleep 3
+          done
+          docker compose exec -T db psql -U postgres -d tww -tAc "SELECT 1"
+          docker compose run --rm pum -p pg_tww -d datamodel install -p SRID 2056 -p modification_agxx ${{ matrix.agxx }} -p webgis ${{ matrix.webgis }}
+      - name: Native GUI and database A/B
+        working-directory: /tmp/teksi-upstream
+        run: |
+          set -uo pipefail
+          container="$(docker compose ps -q qgis)"
+          docker cp "$GITHUB_WORKSPACE/scripts/qgis_gui_db_roundtrip.py" "$container:/tmp/qgis_gui_db_roundtrip.py" || exit 1
+          docker cp "$GITHUB_WORKSPACE/patch/complete.review.json" "$container:/tmp/complete.review.json" || exit 1
+          for version in baseline candidate; do
+            if [ "$version" = baseline ]; then qgs=teksi_wastewater.qgs; else qgs=teksi_wastewater_candidate.qgs; fi
+            docker compose exec -T qgis sh -c "QT_QPA_PLATFORM=xcb xvfb-run -a /usr/bin/python3 /tmp/qgis_gui_db_roundtrip.py /usr/src/project/$qgs /tmp/complete.review.json $version ${{ matrix.variant }}" 2>&1 | tee "$GITHUB_WORKSPACE/gui-$version.txt"
+            status=$?
+            printf '%s\n' "$status" > "$GITHUB_WORKSPACE/gui-$version.exit"
+            echo "ROUNDTRIP_EXIT $version $status"
+          done
+          test "$(cat "$GITHUB_WORKSPACE/gui-candidate.exit")" = 0
+          grep -q "GUI_DB_COMPLETE_PASS candidate" "$GITHUB_WORKSPACE/gui-candidate.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gui-db-roundtrip-${{ matrix.variant }}
+          path: |
+            gui-*.txt
+            gui-*.exit
