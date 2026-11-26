@@ -27,6 +27,8 @@ except ImportError:
     import psycopg2 as pg
 
 project_path, manifest_path, version, variant = sys.argv[1:5]
+case = sys.argv[5] if len(sys.argv)>5 else "all"
+assert case in ("all","forms","display","constraints","pump","catchment","insert")
 assert version in ("baseline", "candidate")
 app = QgsApplication([], True)
 app.initQgis()
@@ -40,7 +42,7 @@ db.autocommit = False
 errors = []
 results = []
 tag = "B" if version == "baseline" else "A"
-prefix = "TWWQA" + tag
+prefix = "TWWQA" + tag + {"all":"X","forms":"F","display":"D","constraints":"C","pump":"P","catchment":"T","insert":"I"}[case]
 
 def sql(query, params=(), fetch=False):
     with db.cursor() as cur:
@@ -84,6 +86,7 @@ def empty(obj):
 def form_for(obj, f):
     context = QgsAttributeEditorContext()
     context.setMapCanvas(canvas)
+    print("FORM_CONSTRUCT",obj.id(),obj.styleManager().currentStyle(),flush=True)
     form = QgsAttributeForm(obj, f, context)
     form.resize(1100, 800)
     form.show()
@@ -201,7 +204,13 @@ def check_forms():
                 assert manager.setCurrentStyle(oldstyle),key
     print("GUI_FORM_BINDINGS_VERIFIED",count,flush=True)
 
-record("C2_C5_open_native_forms",check_forms)
+if case in ("all","forms"):
+    record("C2_C5_open_native_forms",check_forms)
+if case=="forms":
+    print("GUI_DB_RESULTS",json.dumps(results),flush=True)
+    assert not errors,errors
+    print("GUI_DB_COMPLETE_PASS",version,variant,case,flush=True)
+    sys.exit(0)
 try:
     ws,wn,log,cat,ov=fixture()
 except Exception:
@@ -254,7 +263,8 @@ def check_default_constraints():
         form.close();form.deleteLater();app.processEvents()
         rollback_layer(target)
 
-record("C3_C4_real_data_and_gui_warnings",check_default_constraints)
+if case in ("all","constraints"):
+    record("C3_C4_real_data_and_gui_warnings",check_default_constraints)
 
 def check_pump_write():
     overflow.reload()
@@ -297,7 +307,8 @@ def check_pump_write():
         if overflow.isEditable():overflow.rollBack()
         if m.currentStyle()!=old:m.setCurrentStyle(old)
 
-record("C2_C5_pump_form_commit_and_rollback",check_pump_write)
+if case in ("all","pump"):
+    record("C2_C5_pump_form_commit_and_rollback",check_pump_write)
 
 def check_catchment_write():
     # Save via the unmodified application's view and INSTEAD OF triggers.
@@ -338,7 +349,8 @@ def check_catchment_write():
         form.close();form.deleteLater();app.processEvents()
         if target.isEditable():target.rollBack()
 
-record("C3_C4_catchment_form_commit_and_rollback",check_catchment_write)
+if case in ("all","catchment"):
+    record("C3_C4_catchment_form_commit_and_rollback",check_catchment_write)
 
 def check_display():
     # Actual rows, not synthetic feature names, for all three repaired displays.
@@ -375,7 +387,8 @@ def check_display():
             else:
                 assert str(value)!=expected,(obj.name(),value)
 
-record("C1_display_real_database_rows",check_display)
+if case in ("all","display"):
+    record("C1_display_real_database_rows",check_display)
 
 def check_pump_insert():
     # Exercise an actual add-feature form, followed by provider commit/readback.
@@ -416,9 +429,10 @@ def check_pump_insert():
         if overflow.isEditable():overflow.rollBack()
         if manager.currentStyle()!=oldstyle:manager.setCurrentStyle(oldstyle)
 
-record("C2_C5_pump_add_feature_and_save",check_pump_insert)
+if case in ("all","insert"):
+    record("C2_C5_pump_add_feature_and_save",check_pump_insert)
 
 db.close()
 print("GUI_DB_RESULTS",json.dumps(results),flush=True)
 assert not errors,errors
-print("GUI_DB_COMPLETE_PASS",version,variant,flush=True)
+print("GUI_DB_COMPLETE_PASS",version,variant,case,flush=True)
