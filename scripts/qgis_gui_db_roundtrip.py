@@ -12,6 +12,7 @@ from pathlib import Path
 import os
 
 from qgis.PyQt.QtWidgets import QWidget
+from qgis.PyQt import sip
 from qgis.core import (
     QgsApplication, QgsFeature, QgsFeatureRequest, QgsFieldConstraints,
     QgsProject, QgsVectorLayer, QgsExpression, QgsExpressionContext,
@@ -107,6 +108,12 @@ def form_for(obj, f):
     app.processEvents()
     return form
 
+def destroy_form(form):
+    # Synchronous destruction disconnects layer callbacks before rollback.
+    form.close()
+    sip.delete(form)
+    app.processEvents()
+
 def wrappers(form):
     result = collections.defaultdict(list)
     for widget in form.findChildren(QWidget):
@@ -121,8 +128,10 @@ def form_field(form, name):
     return w[0]
 
 def change(form, name, value):
+    w=form_field(form,name)
     form.changeAttribute(name, value)
     app.processEvents()
+    print("FORM_FIELD_VALUE",name,repr(w.value()),"enabled",w.widget().isEnabled(),flush=True)
 
 def evaluate(obj, f, expr):
     ctx = QgsExpressionContext()
@@ -135,6 +144,8 @@ def evaluate(obj, f, expr):
     return value
 
 def commit_layer(obj):
+    print("COMMIT_STATE",obj.name(),"editable",obj.isEditable(),"modified",obj.isModified(),"transaction_mode",project.transactionMode(),flush=True)
+    assert obj.isModified(), (obj.name(),"form did not stage an edit")
     assert obj.commitChanges(), (obj.name(), obj.commitErrors())
     obj.reload()
     app.processEvents()
@@ -220,9 +231,7 @@ def check_forms():
                         assert obj.editFormConfig().readOnly(obj.fields().indexFromName(name))
                         assert name in fields
             finally:
-                form.close()
-                form.deleteLater()
-                app.processEvents()
+                destroy_form(form)
         finally:
             if manager.currentStyle()!=oldstyle:
                 assert manager.setCurrentStyle(oldstyle),key
@@ -284,7 +293,7 @@ def check_default_constraints():
                     if not expected:
                         assert wrapper.constraintResult()==QgsEditorWidgetWrapper.ConstraintResultFailSoft
     finally:
-        form.close();form.deleteLater();app.processEvents()
+        destroy_form(form)
         rollback_layer(target)
 
 if case in ("all","constraints"):
@@ -310,12 +319,13 @@ def check_pump_write():
             form_field(form,name)
             change(form,name,6)
             assert form.save(), "QGIS attribute form save failed"
+            assert float(feature(overflow,ov)[name])==6,("pump edit not staged",feature(overflow,ov)[name])
             commit_layer(overflow)
             assert float(scalar("SELECT pump_flow_min_single FROM tww_od.pump WHERE obj_id=%s",(ov,)))==6
             db.commit()
             print("PUMP_COMMIT_READBACK",6,flush=True)
         finally:
-            form.close();form.deleteLater();app.processEvents()
+            destroy_form(form)
         assert overflow.startEditing()
         form=form_for(overflow,feature(overflow,ov))
         try:
@@ -326,7 +336,7 @@ def check_pump_write():
             db.commit()
             print("PUMP_ROLLBACK_READBACK",6,flush=True)
         finally:
-            form.close();form.deleteLater();app.processEvents()
+            destroy_form(form)
     finally:
         if overflow.isEditable():overflow.rollBack()
         if m.currentStyle()!=old:m.setCurrentStyle(old)
@@ -348,6 +358,9 @@ def check_catchment_write():
                 expected=(prefix+"-"+labels[code])[:20]
                 assert actual==expected,(p,actual,expected)
         assert form.save(), "QGIS catchment form save failed"
+        staged=feature(target,cat)
+        for p in ("hc_c_","hc_o_","hc_p_"):
+            assert float(staged[p+"pump_flow_min"])==6,("catchment edit not staged",p,staged[p+"pump_flow_min"])
         commit_layer(target)
         rows=sql("SELECT status,identifier,pump_flow_min FROM tww_od.hydraulic_char_data WHERE fk_wastewater_node=%s ORDER BY status",(wn,),True)
         assert len(rows)==3,rows
@@ -358,7 +371,7 @@ def check_catchment_write():
         db.commit()
         print("CATCHMENT_COMMIT_READBACK",rows,flush=True)
     finally:
-        form.close();form.deleteLater();app.processEvents()
+        destroy_form(form)
         if target.isEditable():target.rollBack()
     assert target.startEditing()
     form=form_for(target,feature(target,cat))
@@ -370,7 +383,7 @@ def check_catchment_write():
         db.commit()
         print("CATCHMENT_ROLLBACK_READBACK",6,flush=True)
     finally:
-        form.close();form.deleteLater();app.processEvents()
+        destroy_form(form)
         if target.isEditable():target.rollBack()
 
 if case in ("all","catchment"):
@@ -394,7 +407,7 @@ def check_display():
         if row["layer"]=="vw_tww_additional_ws":
             f=feature(obj,extra);expected=prefix+"EX"
         else:
-            req=QgsFeatureRequest().setFilterExpression('"id" = '+str(int(relation_id)))
+            req=QgsFeatureRequest().setFilterExpression('"id" = '+QgsExpression.quotedString(str(relation_id)))
             records=list(obj.getFeatures(req))
             assert len(records)==1,(obj.name(),relation_id,len(records))
             f=records[0]
@@ -442,13 +455,14 @@ def check_pump_insert():
             change(form,minimum,4)
             change(form,"pu_pump_flow_max_single",9)
             assert form.save(),"QGIS add-feature form save failed"
+            print("PUMP_ADD_BUFFER",len(overflow.editBuffer().addedFeatures()) if overflow.editBuffer() else None,flush=True)
             commit_layer(overflow)
             rows=sql("SELECT pump_flow_min_single,pump_flow_max_single FROM tww_od.pump WHERE obj_id=%s",(new_oid,),True)
             assert len(rows)==1 and tuple(map(float,rows[0]))==(4,9),rows
             db.commit()
             print("PUMP_INSERT_READBACK",rows,flush=True)
         finally:
-            form.close();form.deleteLater();app.processEvents()
+            destroy_form(form)
     finally:
         if overflow.isEditable():overflow.rollBack()
         if manager.currentStyle()!=oldstyle:manager.setCurrentStyle(oldstyle)
