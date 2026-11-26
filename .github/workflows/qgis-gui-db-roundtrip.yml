@@ -70,13 +70,17 @@ jobs:
           docker cp "$GITHUB_WORKSPACE/patch/complete.review.json" "$container:/tmp/complete.review.json" || exit 1
           for version in baseline candidate; do
             if [ "$version" = baseline ]; then qgs=teksi_wastewater.qgs; else qgs=teksi_wastewater_candidate.qgs; fi
-            status=0
-            docker compose exec -T qgis sh -c "QT_QPA_PLATFORM=xcb xvfb-run -a /usr/bin/python3 -X faulthandler /tmp/qgis_gui_db_roundtrip.py /usr/src/project/$qgs /tmp/complete.review.json $version ${{ matrix.variant }}" 2>&1 | tee "$GITHUB_WORKSPACE/gui-$version.txt" || status=$?
-            printf '%s\n' "$status" > "$GITHUB_WORKSPACE/gui-$version.exit"
-            echo "ROUNDTRIP_EXIT $version $status"
+            for case in forms display constraints pump catchment insert; do
+              status=0
+              docker compose exec -T qgis sh -c "QT_QPA_PLATFORM=xcb xvfb-run -a /usr/bin/python3 -X faulthandler /tmp/qgis_gui_db_roundtrip.py /usr/src/project/$qgs /tmp/complete.review.json $version ${{ matrix.variant }} $case" 2>&1 | tee "$GITHUB_WORKSPACE/gui-$version-$case.txt" || status=$?
+              printf '%s\n' "$status" > "$GITHUB_WORKSPACE/gui-$version-$case.exit"
+              echo "ROUNDTRIP_EXIT $version $case $status"
+            done
           done
-          test "$(cat "$GITHUB_WORKSPACE/gui-candidate.exit")" = 0
-          grep -q "GUI_DB_COMPLETE_PASS candidate" "$GITHUB_WORKSPACE/gui-candidate.txt"
+          for case in forms display constraints pump catchment insert; do
+            test "$(cat "$GITHUB_WORKSPACE/gui-candidate-$case.exit")" = 0
+            grep -q "GUI_DB_COMPLETE_PASS candidate" "$GITHUB_WORKSPACE/gui-candidate-$case.txt"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
