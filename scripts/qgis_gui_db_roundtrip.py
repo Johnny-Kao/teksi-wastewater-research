@@ -32,10 +32,13 @@ project_path, manifest_path, version, variant = sys.argv[1:5]
 case = sys.argv[5] if len(sys.argv)>5 else "all"
 assert case in ("all","forms","display","constraints","pump","catchment","insert")
 assert version in ("baseline", "candidate")
-app = QgsApplication([], True)
-app.initQgis()
-canvas = QgsMapCanvas()
-QgsGui.editorWidgetRegistry().initEditors(canvas)
+from qgis.utils import iface
+assert iface is not None, "Run inside the QGIS desktop application"
+app = QgsApplication.instance()
+canvas = iface.mapCanvas()
+assert canvas is not None
+assert iface.vectorLayerTools() is not None
+print("REAL_QGIS_DESKTOP_INTERFACE", flush=True)
 # Register the exact third-party factories used by the shipped project.
 for plugin_path in ("/tmp/teksi-lre", "/tmp/teksi-dms"):
     assert Path(plugin_path).is_dir(), plugin_path
@@ -101,6 +104,7 @@ def empty(obj):
 def form_for(obj, f):
     context = QgsAttributeEditorContext()
     context.setMapCanvas(canvas)
+    context.setVectorLayerTools(iface.vectorLayerTools())
     context.setFormMode(QgsAttributeEditorContext.StandaloneDialog)
     print("FORM_CONSTRUCT",obj.id(),obj.styleManager().currentStyle(),flush=True)
     form = QgsAttributeForm(obj, f, context)
