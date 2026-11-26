@@ -1,0 +1,62 @@
+name: QGIS translation source A/B
+on:
+  push:
+    branches:
+      - research/qgis-form-display-repair-20261123
+    paths:
+      - .github/workflows/qgis-translation-ab.yml
+  workflow_dispatch:
+
+jobs:
+  translation-ab:
+    runs-on: ubuntu-26.04
+    env:
+      COMPOSE_PROFILES: qgis
+      PGSERVICE: pg_tww
+      DB_NAME: tww
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: Johnny-Kao/wastewater
+          ref: 8997b4c33aaae618b2d85201d59549ed001db112
+          fetch-depth: 0
+      - name: Prepare exact upstream and PR project files
+        run: |
+          git show 0608da0ebd911f4d21a1281e930cd220a78d5f50:project/teksi_wastewater.qgs > /tmp/baseline.qgs
+          cp project/teksi_wastewater.qgs /tmp/candidate.qgs
+          sha256sum /tmp/baseline.qgs /tmp/candidate.qgs
+          git diff --exit-code 0608da0ebd911f4d21a1281e930cd220a78d5f50 HEAD -- project/scripts/project-translation-create-source.py plugin/.docker/Dockerfile docker-compose.yml
+      - name: Start official translation workflow environment
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose up --build -d; then break; fi
+            test "$attempt" != 3
+            sleep 10
+          done
+          until docker compose exec -T db pg_isready -h 127.0.0.1 -U postgres; do sleep 2; done
+          docker compose exec -T db createdb -U postgres "$DB_NAME"
+          docker compose run --rm pum -vvv -p "$PGSERVICE" -d datamodel install -p SRID 2056
+          docker compose exec -T qgis /usr/bin/python3 -c 'from qgis.core import Qgis; print(Qgis.QGIS_VERSION)'
+      - name: Run exact upstream translation script A/B
+        run: |
+          mkdir -p /tmp/translation-results
+          for version in baseline candidate; do
+            cp "/tmp/$version.qgs" project/teksi_wastewater.qgs
+            rm -f project/teksi_wastewater_en.ts
+            status=0
+            docker compose exec -T qgis sh -c "PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1 xvfb-run -a /usr/src/project/scripts/project-translation-create-source.py /usr/src/project/teksi_wastewater.qgs" > "/tmp/translation-results/$version.log" 2>&1 || status=$?
+            echo "TRANSLATION_EXIT $version $status"
+            echo "$status" > "/tmp/translation-results/$version.exit"
+            tail -n 55 "/tmp/translation-results/$version.log"
+            if [ -f project/teksi_wastewater_en.ts ]; then
+              cp project/teksi_wastewater_en.ts "/tmp/translation-results/$version.ts"
+              wc -c "/tmp/translation-results/$version.ts"
+            fi
+          done
+          cp /tmp/candidate.qgs project/teksi_wastewater.qgs
+          test "$(cat /tmp/translation-results/candidate.exit)" = 0
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: translation-ab-results
+          path: /tmp/translation-results/
