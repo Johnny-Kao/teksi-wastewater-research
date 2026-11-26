@@ -120,14 +120,14 @@ jobs:
           docker cp "$GITHUB_WORKSPACE/qgis_desktop_launcher.py" "$container:/tmp/qgis_desktop_launcher.py"
           for version in baseline candidate; do
             if [ "$version" = baseline ]; then qgs=teksi_wastewater.qgs; else qgs=teksi_wastewater_candidate.qgs; fi
-            for case in forms display constraints pump catchment insert; do
+            for case in forms display constraints pump catchment_sql catchment insert; do
               status=0
               docker compose exec -T qgis env QT_QPA_PLATFORM=xcb TWW_PROJECT="/usr/src/project/$qgs" TWW_VERSION="$version" TWW_VARIANT="${{ matrix.variant }}" TWW_CASE="$case" timeout 120s xvfb-run -a qgis --nologo --noplugins --noversioncheck --code /tmp/qgis_desktop_launcher.py 2>&1 | tee "$GITHUB_WORKSPACE/gui-$version-$case.txt" || status=$?
               printf '%s\n' "$status" > "$GITHUB_WORKSPACE/gui-$version-$case.exit"
               echo "ROUNDTRIP_EXIT $version $case $status"
             done
           done
-          for case in forms display constraints pump catchment insert; do
+          for case in forms display constraints pump catchment_sql catchment insert; do
             test "$(cat "$GITHUB_WORKSPACE/gui-candidate-$case.exit")" = 0
             grep -q "GUI_DB_COMPLETE_PASS candidate" "$GITHUB_WORKSPACE/gui-candidate-$case.txt"
           done
