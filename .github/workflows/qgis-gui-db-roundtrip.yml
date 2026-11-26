@@ -93,11 +93,36 @@ jobs:
           container="$(docker compose ps -q qgis)"
           docker cp "$GITHUB_WORKSPACE/scripts/qgis_gui_db_roundtrip.py" "$container:/tmp/qgis_gui_db_roundtrip.py" || exit 1
           docker cp "$GITHUB_WORKSPACE/patch/complete.review.json" "$container:/tmp/complete.review.json" || exit 1
+          cat > "$GITHUB_WORKSPACE/qgis_desktop_launcher.py" <<'PY'
+          import os
+          import sys
+          import traceback
+          import faulthandler
+          from qgis.PyQt.QtCore import QTimer
+          faulthandler.enable()
+          def run_roundtrip():
+              try:
+                  sys.argv = ["/tmp/qgis_gui_db_roundtrip.py", os.environ["TWW_PROJECT"], "/tmp/complete.review.json", os.environ["TWW_VERSION"], os.environ["TWW_VARIANT"], os.environ["TWW_CASE"]]
+                  with open(sys.argv[0], "rb") as source:
+                      exec(compile(source.read(), sys.argv[0], "exec"), {"__name__": "__main__"})
+              except SystemExit as exc:
+                  code = exc.code if isinstance(exc.code, int) else 1
+              except BaseException:
+                  traceback.print_exc()
+                  code = 1
+              else:
+                  code = 0
+              sys.stdout.flush()
+              sys.stderr.flush()
+              os._exit(code)
+          QTimer.singleShot(500, run_roundtrip)
+          PY
+          docker cp "$GITHUB_WORKSPACE/qgis_desktop_launcher.py" "$container:/tmp/qgis_desktop_launcher.py"
           for version in baseline candidate; do
             if [ "$version" = baseline ]; then qgs=teksi_wastewater.qgs; else qgs=teksi_wastewater_candidate.qgs; fi
             for case in forms display constraints pump catchment insert; do
               status=0
-              docker compose exec -T qgis sh -c "QT_QPA_PLATFORM=xcb xvfb-run -a /usr/bin/python3 -X faulthandler /tmp/qgis_gui_db_roundtrip.py /usr/src/project/$qgs /tmp/complete.review.json $version ${{ matrix.variant }} $case" 2>&1 | tee "$GITHUB_WORKSPACE/gui-$version-$case.txt" || status=$?
+              docker compose exec -T qgis env QT_QPA_PLATFORM=xcb TWW_PROJECT="/usr/src/project/$qgs" TWW_VERSION="$version" TWW_VARIANT="${{ matrix.variant }}" TWW_CASE="$case" timeout 120s xvfb-run -a qgis --nologo --noplugins --noversioncheck --code /tmp/qgis_desktop_launcher.py 2>&1 | tee "$GITHUB_WORKSPACE/gui-$version-$case.txt" || status=$?
               printf '%s\n' "$status" > "$GITHUB_WORKSPACE/gui-$version-$case.exit"
               echo "ROUNDTRIP_EXIT $version $case $status"
             done
