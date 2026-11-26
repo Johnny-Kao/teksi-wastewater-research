@@ -9,6 +9,7 @@ import json
 import sys
 import traceback
 from pathlib import Path
+import os
 
 from qgis.PyQt.QtWidgets import QWidget
 from qgis.core import (
@@ -34,6 +35,19 @@ app = QgsApplication([], True)
 app.initQgis()
 canvas = QgsMapCanvas()
 QgsGui.editorWidgetRegistry().initEditors(canvas)
+# Register the exact third-party factories used by the shipped project.
+for plugin_path in ("/tmp/teksi-lre", "/tmp/teksi-dms"):
+    assert Path(plugin_path).is_dir(), plugin_path
+    sys.path.insert(0, plugin_path)
+from linking_relation_editor.gui.linking_relation_editor_widget_factory import LinkingRelationEditorWidgetFactory
+from document_management_system.gui.relation_editor_feature_side_widget_factory import RelationEditorFeatureSideWidgetFactory
+from document_management_system.gui.relation_editor_document_side_widget_factory import RelationEditorDocumentSideWidgetFactory
+registry = QgsGui.relationWidgetRegistry()
+for factory_type in (LinkingRelationEditorWidgetFactory, RelationEditorFeatureSideWidgetFactory, RelationEditorDocumentSideWidgetFactory):
+    factory = factory_type()
+    widget_type = factory.type()
+    registry.addRelationWidget(factory)
+    print("REGISTERED_RELATION_FACTORY", widget_type, flush=True)
 project = QgsProject.instance()
 assert project.read(project_path), project_path
 manifest = json.loads(Path(manifest_path).read_text())["changes"]
@@ -152,8 +166,10 @@ def fixture():
             (hc_ids[suffix], "old-"+suffix, wn,status))
     cat = oid("catchment_area_totals")
     sql("""INSERT INTO tww_od.catchment_area_totals
-            (obj_id,identifier,fk_hydraulic_char_data,fk_log_card)
-            VALUES (%s,%s,%s,%s)""", (cat,prefix,hc_ids["C"],log))
+            (obj_id,identifier,fk_hydraulic_char_data)
+            VALUES (%s,%s,%s)""", (cat,prefix,hc_ids["C"]))
+    sql("REFRESH MATERIALIZED VIEW tww_app.mvw_catchment_area_totals")
+    assert scalar("SELECT fk_log_card FROM tww_app.vw_tww_catchment_area_totals WHERE obj_id=%s",(cat,)) == log
     ov = oid("overflow")
     sql("INSERT INTO tww_od.overflow (obj_id,identifier,fk_wastewater_node) VALUES (%s,%s,%s)",(ov,prefix+"PUMP",wn))
     sql("INSERT INTO tww_od.pump (obj_id,pump_flow_min_single,pump_flow_max_single) VALUES (%s,5,10)",(ov,))
@@ -170,6 +186,9 @@ def check_forms():
     for key,rows in groups.items():
         lid,style = key.rsplit("|",1)
         obj = layer(lid)
+        if style == "AG-64/96" and variant != "agxx":
+            print("NOT_APPLICABLE_EXTENSION_STYLE",key,variant,flush=True)
+            continue
         manager = obj.styleManager()
         oldstyle = manager.currentStyle()
         if style != oldstyle:
