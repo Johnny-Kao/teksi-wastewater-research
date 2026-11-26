@@ -14,6 +14,7 @@ from qgis.PyQt.QtWidgets import QWidget
 from qgis.core import (
     QgsApplication, QgsFeature, QgsFeatureRequest, QgsFieldConstraints,
     QgsProject, QgsVectorLayer, QgsExpression, QgsExpressionContext,
+    QgsVectorLayerUtils, QgsGeometry, QgsPoint,
     QgsExpressionContextUtils,
 )
 from qgis.gui import (
@@ -338,6 +339,85 @@ def check_catchment_write():
         if target.isEditable():target.rollBack()
 
 record("C3_C4_catchment_form_commit_and_rollback",check_catchment_write)
+
+def check_display():
+    # Actual rows, not synthetic feature names, for all three repaired displays.
+    event=prefix+"ME"
+    sql("INSERT INTO tww_od.maintenance_event (obj_id,identifier) VALUES (%s,%s)",(event,event))
+    relation_id=scalar("""INSERT INTO tww_od.re_maintenance_event_wastewater_structure
+        (fk_maintenance_event,fk_wastewater_structure) VALUES (%s,%s) RETURNING id""",(event,ws))
+    extra=scalar("""INSERT INTO tww_app.vw_tww_additional_ws
+        (identifier,ws_type,situation3d_geometry,wn_backflow_level_current)
+        VALUES (%s,'drainless_toilet',ST_SetSRID(ST_MakePoint(2600010,1200010),2056),100)
+        RETURNING obj_id""",(prefix+"EX",))
+    db.commit()
+    for row in manifest:
+        if row["category"]!="C1":continue
+        lid,style=row["layer_style"].rsplit("|",1)
+        obj=layer(lid);obj.reload()
+        if row["layer"]=="vw_tww_additional_ws":
+            f=feature(obj,extra);expected=prefix+"EX"
+        else:
+            req=QgsFeatureRequest().setFilterExpression('"id" = '+str(int(relation_id)))
+            records=list(obj.getFeatures(req))
+            assert len(records)==1,(obj.name(),relation_id,len(records))
+            f=records[0]
+            expected=str(relation_id) if row["layer"]=="re_maintenance_event_wastewater_structure" else prefix
+        expr=obj.displayExpression()
+        if version=="candidate":
+            assert str(evaluate(obj,f,expr))==expected,(obj.name(),expr,expected)
+            print("REAL_DB_DISPLAY_PASS",obj.name(),expected,flush=True)
+        else:
+            try:
+                value=evaluate(obj,f,expr)
+            except AssertionError as exc:
+                print("BASELINE_DISPLAY_FAILURE",obj.name(),str(exc),flush=True)
+            else:
+                assert str(value)!=expected,(obj.name(),value)
+
+record("C1_display_real_database_rows",check_display)
+
+def check_pump_insert():
+    # Exercise an actual add-feature form, followed by provider commit/readback.
+    oid=prefix+"NEW"
+    overflow.reload()
+    manager=overflow.styleManager()
+    oldstyle=manager.currentStyle()
+    if variant=="agxx":
+        assert manager.setCurrentStyle("AG-64/96")
+    assert overflow.startEditing()
+    try:
+        values={"obj_id":oid,"identifier":oid,"overflow_type":"pump","fk_wastewater_node":wn}
+        attrs={overflow.fields().indexFromName(n):v for n,v in values.items()}
+        assert -1 not in attrs,values
+        ctx=QgsExpressionContext()
+        ctx.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(overflow))
+        f=QgsVectorLayerUtils.createFeature(overflow,QgsGeometry(QgsPoint(2600000,1200000,100)),attrs,ctx)
+        form=form_for(overflow,f)
+        try:
+            form.setMode(QgsAttributeEditorContext.AddFeatureMode)
+            app.processEvents()
+            minimum="pu_pump_flow_min_single"
+            if version=="baseline" and variant=="agxx" and minimum not in wrappers(form):
+                print("BASELINE_ADD_PUMP_MISSING_WIDGET",minimum,flush=True)
+                return
+            form_field(form,minimum)
+            change(form,minimum,4)
+            change(form,"pu_pump_flow_max_single",9)
+            assert form.save(),"QGIS add-feature form save failed"
+            commit_layer(overflow)
+            rows=sql("SELECT pump_flow_min_single,pump_flow_max_single FROM tww_od.pump WHERE obj_id=%s",(oid,),True)
+            assert len(rows)==1 and tuple(map(float,rows[0]))==(4,9),rows
+            db.commit()
+            print("PUMP_INSERT_READBACK",rows,flush=True)
+        finally:
+            form.close();form.deleteLater();app.processEvents()
+    finally:
+        if overflow.isEditable():overflow.rollBack()
+        if manager.currentStyle()!=oldstyle:manager.setCurrentStyle(oldstyle)
+
+record("C2_C5_pump_add_feature_and_save",check_pump_insert)
+
 db.close()
 print("GUI_DB_RESULTS",json.dumps(results),flush=True)
 assert not errors,errors
