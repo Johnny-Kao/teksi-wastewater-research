@@ -61,6 +61,26 @@ jobs:
           done
           docker compose exec -T db psql -U postgres -d tww -tAc "SELECT 1"
           docker compose run --rm pum -p pg_tww -d datamodel install -p SRID 2056 -p modification_agxx ${{ matrix.agxx }} -p webgis ${{ matrix.webgis }}
+      - name: Install pinned official relation widget dependencies
+        working-directory: /tmp/teksi-upstream
+        run: |
+          set -euo pipefail
+          for dep in lre dms; do
+            if [ "$dep" = lre ]; then
+              url=https://github.com/opengisch/qgis-linking-relation-editor.git
+              revision=81570030504f0eeadfabf9f7a4a1d108fbe2a6dd
+            else
+              url=https://github.com/opengisch/qgis-document-management-system-plugin.git
+              revision=cc241f9cd110b666aee25c47252efc25b5b47739
+            fi
+            git init "/tmp/teksi-$dep"
+            git -C "/tmp/teksi-$dep" remote add origin "$url"
+            git -C "/tmp/teksi-$dep" fetch --depth 1 origin "$revision"
+            git -C "/tmp/teksi-$dep" checkout --detach FETCH_HEAD
+            test "$(git -C "/tmp/teksi-$dep" rev-parse HEAD)" = "$revision"
+            docker cp "/tmp/teksi-$dep" "$(docker compose ps -q qgis):/tmp/teksi-$dep"
+          done
+          docker compose exec -T -u root qgis sh -c 'apt-get update && apt-get install -y qml-module-qtquick-controls qml-module-qtquick-dialogs qml-module-qtquick-layouts'
       - name: Native GUI and database A/B
         working-directory: /tmp/teksi-upstream
         run: |
