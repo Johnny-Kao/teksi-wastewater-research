@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: Johnny-Kao/wastewater
-          ref: c30fa4e49d5d185e5ee42c96e8cbd8891a2be60b
+          ref: 8997b4c33aaae618b2d85201d59549ed001db112
           submodules: recursive
 
       - name: Setup env
@@ -92,7 +92,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: Johnny-Kao/wastewater
-          ref: c30fa4e49d5d185e5ee42c96e8cbd8891a2be60b
+          ref: 8997b4c33aaae618b2d85201d59549ed001db112
           submodules: recursive
 
       - name: Setup env
